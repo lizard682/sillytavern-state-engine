@@ -1,0 +1,83 @@
+{
+  "schema": 3,
+  "id": "action-demo",
+  "name": "示例反应库",
+  "binding": {
+    "type": "none",
+    "name": ""
+  },
+  "trigger": {
+    "manual": true,
+    "auto": true,
+    "autoEvery": 3,
+    "keyword": true,
+    "ai": false
+  },
+  "keywords": [
+    "回应",
+    "沉默",
+    "被夸奖"
+  ],
+  "scan": {
+    "depth": 3,
+    "source": "both"
+  },
+  "inject": {
+    "position": "chat",
+    "depth": 2,
+    "role": "system"
+  },
+  "cooldown": 4,
+  "pick": 1,
+  "aiPrompt": "",
+  "items": [
+    {
+      "id": "pause-then-answer",
+      "name": "先停半拍再回答",
+      "text": "被问到时不急着接话，先垂眼想一下，再慢慢开口，答案往往比预想的更诚实。",
+      "weight": 1
+    },
+    {
+      "id": "answer-with-question",
+      "name": "用问题挡回去",
+      "text": "不正面回答，反而笑着反问一句，把话题轻轻推回对方那边。",
+      "weight": 1
+    },
+    {
+      "id": "look-away",
+      "name": "别开视线",
+      "text": "目光先移开去看别处，手指无意识地碰一下杯沿或衣角，再低声把话说下去。",
+      "weight": 1
+    },
+    {
+      "id": "deny-softly",
+      "name": "小声否认",
+      "text": "嘴上说着“哪有那么夸张”，耳根却先红了，否认得很没底气。",
+      "weight": 1
+    },
+    {
+      "id": "silence",
+      "name": "沉默",
+      "text": "不说话，只是安静地看着对方，久到对方先受不了这种安静。",
+      "weight": 1
+    },
+    {
+      "id": "change-subject",
+      "name": "岔开话题",
+      "text": "把话题往别处带，语气自然得像本来就打算聊这个。",
+      "weight": 1
+    },
+    {
+      "id": "self-mock",
+      "name": "自嘲一句",
+      "text": "先笑自己一句，把尴尬接过来自己消化掉，再继续往下说。",
+      "weight": 1
+    },
+    {
+      "id": "small-gesture",
+      "name": "做个小动作",
+      "text": "不说漂亮话，只是把对方手边凉掉的茶换成热的，或者把外套往对方那边挪一点。",
+      "weight": 1
+    }
+  ]
+}

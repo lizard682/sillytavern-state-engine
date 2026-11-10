@@ -1,0 +1,77 @@
+{
+  "schema": 3,
+  "id": "scene-demo",
+  "name": "示例场景库",
+  "binding": {
+    "type": "none",
+    "name": ""
+  },
+  "trigger": {
+    "manual": true,
+    "auto": false,
+    "autoEvery": 3,
+    "keyword": true,
+    "ai": false
+  },
+  "keywords": [
+    "去哪",
+    "出发",
+    "约会"
+  ],
+  "scan": {
+    "depth": 4,
+    "source": "both"
+  },
+  "inject": {
+    "position": "chat",
+    "depth": 4,
+    "role": "system"
+  },
+  "cooldown": 2,
+  "pick": 1,
+  "aiPrompt": "",
+  "items": [
+    {
+      "id": "rooftop-dusk",
+      "name": "黄昏的天台",
+      "text": "学校天台，铁门虚掩着。风把晾着的窗帘吹得猎猎响，远处教学楼的灯一盏盏亮起来。",
+      "weight": 1
+    },
+    {
+      "id": "old-bookshop",
+      "name": "旧书店",
+      "text": "巷子深处的旧书店，木地板踩上去会响，空气里有纸页和樟脑丸的味道。老板在柜台后面打瞌睡。",
+      "weight": 1
+    },
+    {
+      "id": "riverside-night",
+      "name": "河堤夜景",
+      "text": "河堤上没什么人，路灯把水面切成一段一段的橘色。桥上的车声很远了。",
+      "weight": 1
+    },
+    {
+      "id": "convenience-store",
+      "name": "深夜便利店",
+      "text": "街角便利店，冷柜嗡嗡响。关东煮的热气糊在玻璃上，店员在补货，头也不抬。",
+      "weight": 1
+    },
+    {
+      "id": "rainy-bus-stop",
+      "name": "雨天的公交站",
+      "text": "公交站牌下只有一把伞的位置。雨顺着棚沿连成线，末班车还有二十分钟。",
+      "weight": 1
+    },
+    {
+      "id": "music-room",
+      "name": "空掉的音乐教室",
+      "text": "音乐教室的窗没关，风把谱架上的纸吹得翻页。钢琴盖开着，最左键有点走音。",
+      "weight": 1
+    },
+    {
+      "id": "festival-street",
+      "name": "庙会长街",
+      "text": "长街两边挂满纸灯笼，人挤着人，章鱼烧和糖炒栗子的味道混在一起。远处有人在敲太鼓。",
+      "weight": 1
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "schema": 3,
+  "id": "npc-skill-demo",
+  "name": "示例 NPC 技能库",
+  "binding": {
+    "type": "none",
+    "name": ""
+  },
+  "trigger": {
+    "manual": true,
+    "auto": false,
+    "autoEvery": 3,
+    "keyword": true,
+    "ai": false
+  },
+  "keywords": [
+    "登场",
+    "自我介绍"
+  ],
+  "scan": {
+    "depth": 5,
+    "source": "ai"
+  },
+  "inject": {
+    "position": "chat",
+    "depth": 3,
+    "role": "system"
+  },
+  "cooldown": 0,
+  "pick": 2,
+  "aiPrompt": "",
+  "items": [
+    {
+      "id": "baking",
+      "name": "烘焙",
+      "text": "会烤不太甜的饼干和戚风，失败品自己默默吃掉。",
+      "weight": 1
+    },
+    {
+      "id": "first-aid",
+      "name": "急救",
+      "text": "包扎和止血很熟练，随身的小包里有创可贴和碘伏。",
+      "weight": 1
+    },
+    {
+      "id": "repair",
+      "name": "修理",
+      "text": "能修好大部分小家电和自行车，工具包摊开来像个小手术台。",
+      "weight": 1
+    },
+    {
+      "id": "painting",
+      "name": "画画",
+      "text": "速写本不离身，给人画肖像时总把对方画得比本人温柔。",
+      "weight": 1
+    },
+    {
+      "id": "computer",
+      "name": "修电脑",
+      "text": "重装系统和找回文件都很在行，嘴上说麻烦，手上没停过。",
+      "weight": 1
+    },
+    {
+      "id": "tarot",
+      "name": "占卜",
+      "text": "会用塔罗牌讲些模棱两可的话，但偶尔准得让人背后发凉。",
+      "weight": 1
+    },
+    {
+      "id": "bartender",
+      "name": "调酒",
+      "text": "记得住每个人喜欢的口味，也能凭一杯酒看出对方今天心情不好。",
+      "weight": 1
+    },
+    {
+      "id": "writing",
+      "name": "写作",
+      "text": "写东西很快，但从不给别人看未完成的稿子。",
+      "weight": 1
+    }
+  ]
+}

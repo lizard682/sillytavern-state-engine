@@ -1,0 +1,12 @@
+# 本地专用、不随仓库分发的文件
+examples/sex-positions.json
+examples/rare-constitutions.json
+tools/convert-wi.mjs
+tools/inspect-wi.mjs
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+node_modules/

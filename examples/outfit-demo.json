@@ -1,0 +1,71 @@
+{
+  "schema": 3,
+  "id": "outfit-demo",
+  "name": "示例衣柜",
+  "binding": {
+    "type": "none",
+    "name": ""
+  },
+  "trigger": {
+    "manual": true,
+    "auto": false,
+    "autoEvery": 3,
+    "keyword": true,
+    "ai": false
+  },
+  "keywords": [
+    "换衣服",
+    "外套",
+    "出门"
+  ],
+  "scan": {
+    "depth": 4,
+    "source": "both"
+  },
+  "inject": {
+    "position": "chat",
+    "depth": 4,
+    "role": "system"
+  },
+  "cooldown": 3,
+  "pick": 1,
+  "aiPrompt": "",
+  "items": [
+    {
+      "id": "hoodie-gray",
+      "name": "灰色连帽衫",
+      "text": "宽松的灰色连帽衫，帽子边缘磨得有些起球，口袋里总揣着一团耳机线。",
+      "weight": 1
+    },
+    {
+      "id": "shirt-white",
+      "name": "白衬衫",
+      "text": "洗得发白的棉质白衬衫，最上面一颗扣子永远是松的，袖子常被随手挽到小臂。",
+      "weight": 1
+    },
+    {
+      "id": "coat-black",
+      "name": "黑色风衣",
+      "text": "有点旧的黑色风衣，肩线很挺，下摆到膝盖，走路时会带起一点风。",
+      "weight": 1
+    },
+    {
+      "id": "dress-green",
+      "name": "墨绿连衣裙",
+      "text": "一条墨绿色的连衣裙，面料偏软，腰线不高，裙摆转身时会轻轻散开。",
+      "weight": 1
+    },
+    {
+      "id": "sweater-cream",
+      "name": "奶油色毛衣",
+      "text": "奶油色的粗针织毛衣，袖子略长，说话时习惯把手指缩进袖口里。",
+      "weight": 1
+    },
+    {
+      "id": "jacket-denim",
+      "name": "旧牛仔外套",
+      "text": "水洗到颜色发浅的牛仔外套，肘部有一小块磨破的痕迹，从没补过。",
+      "weight": 1
+    }
+  ]
+}

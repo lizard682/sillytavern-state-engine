@@ -1,0 +1,77 @@
+{
+  "schema": 3,
+  "id": "item-demo",
+  "name": "示例道具库",
+  "binding": {
+    "type": "none",
+    "name": ""
+  },
+  "trigger": {
+    "manual": true,
+    "auto": true,
+    "autoEvery": 3,
+    "keyword": true,
+    "ai": false
+  },
+  "keywords": [
+    "道具",
+    "拿出",
+    "包里"
+  ],
+  "scan": {
+    "depth": 3,
+    "source": "both"
+  },
+  "inject": {
+    "position": "chat",
+    "depth": 2,
+    "role": "system"
+  },
+  "cooldown": 3,
+  "pick": 1,
+  "aiPrompt": "",
+  "items": [
+    {
+      "id": "camera-old",
+      "name": "旧胶片相机",
+      "text": "机身有磕碰的痕迹，还剩半卷没拍完的胶片，快门声很轻。",
+      "weight": 1
+    },
+    {
+      "id": "pen-fountain",
+      "name": "钢笔",
+      "text": "笔尖有点涩，写字时会漏一点墨在指腹上。",
+      "weight": 1
+    },
+    {
+      "id": "band-aid",
+      "name": "创可贴",
+      "text": "口袋里揉得有点皱的一张，包装上印着卡通图案。",
+      "weight": 1
+    },
+    {
+      "id": "oden",
+      "name": "便利店关东煮",
+      "text": "纸杯还烫手，萝卜煮得很透，汤面上浮着一点葱花。",
+      "weight": 1
+    },
+    {
+      "id": "spare-key",
+      "name": "备用钥匙",
+      "text": "挂在一条旧钥匙圈上，除了自己家的，还有一把不知道开哪扇门的。",
+      "weight": 1
+    },
+    {
+      "id": "unsent-letter",
+      "name": "没寄出的信",
+      "text": "信封已经封好，邮票也贴了，收件人那一栏却是空的。",
+      "weight": 1
+    },
+    {
+      "id": "power-bank",
+      "name": "充电宝",
+      "text": "只剩一格电，线缠得很乱，但关键时刻总能救急。",
+      "weight": 1
+    }
+  ]
+}
