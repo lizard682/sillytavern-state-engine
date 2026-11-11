@@ -72,6 +72,8 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
 | 持续时长 | 抽中的内容保留几轮、永久保留，还是由 AI 判断何时结束 |
 | 触发 | 手动、楼层自动、关键词、AI 判定，可多选 |
 | 递归 | 谁能叫醒它（可被其他合集递归激活）、它能不能继续叫醒别人、是否只在递归阶段激活 |
+| 上级合集 | 把这个合集挂到另一个合集下面，变成它的「子合集」。上层抽签时会先抽子合集，再让子合集抽自己的条目，最多三层 |
+| 只能被上级抽中 | 勾上后，平时的关键词、楼层自动、AI 判定都不会碰它，只有它挂在的那个上层合集抽签时才会轮到它 |
 | 扫描最近 N 条 / 来源 | 关键词在最近几条消息里找；只看玩家、只看 AI、或两者 |
 | 还从哪找 | 除了聊天，还可以勾角色描述、角色性格、情景、用户设定、角色备注、世界书 |
 | 注入位置 / 深度 / 角色 | 聊天记录里、系统提示末尾、提示词最前；深度只对「聊天记录」生效 |
@@ -111,6 +113,18 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
 
 同一楼层只会决定一次：重 roll、swipe、重新生成都沿用这一楼的结果；想换请点「重抽」。
 
+## 合集可以套合集
+
+合集不是只能平铺，可以像文件夹一样套起来：
+
+- 在合集的「上级合集」里选另一个合集，它就变成对方的**子合集**；侧栏里会缩进显示，前面带 `└`。
+- 上层合集抽签时，如果它有子合集，会先按权重抽一个子合集，再让这个子合集抽自己的条目。抽签结果会同时记在上下两层的「当前值」里，后台记录会写 `nested`。
+- 最多套三层，挂成环会被拦住（把合集挂到自己的下级里会提示，不会写进去）。
+- **只能被上级抽中**：勾上以后，关键词、楼层自动、AI 判定都不会碰它，只有它挂靠的那个上层合集抽签时才会轮到它。适合「身体特征 → 宫口特质 → 具体特质」这种一层层往下选的场景。
+- 子合集的权重（`entryWeight`）控制它在兄弟合集里被抽中的相对机会；填 `0` 等于这次不参与。
+
+套起来之后，上层一般不用放条目——它可以是个空容器，只负责「先选哪一类」，内容都在子合集里。
+
 ## 绑定角色与 MVU
 
 如果角色卡的世界书里有 `[InitVar]` 条目（MVU 变量），插件会读出里面的顶层名字，列在下拉框里（比如「沈微澜」）。
@@ -127,11 +141,11 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
 - `导入 JSON` 接受单文件或多文件；同一个 `id` 会覆盖更新。
 - 删除合集只删这份聊天里的这一份，不影响别的聊天。
 
-## JSON 格式（schema 3）
+## JSON 格式（schema 4）
 
 ```json
 {
-  "schema": 3,
+  "schema": 4,
   "id": "outfit",
   "name": "衣柜",
   "binding": { "type": "none", "name": "" },
@@ -139,6 +153,7 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
   "keywords": ["换衣服", "外套"],
   "scan": { "depth": 4, "source": "both", "fields": [] },
   "recursion": { "canBeRecursed": true, "canRecurse": false, "delay": false },
+  "nesting": { "parent": "", "onlyFromParent": false, "entryWeight": 1 },
   "hold": { "mode": "forever", "turns": 3 },
   "inject": { "position": "chat", "depth": 4, "role": "system" },
   "cooldown": 2,
@@ -150,7 +165,9 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
 }
 ```
 
-旧版（schema 1、2）的包在导入时会自动升级；以前填过的合集也会在读取时补齐新字段。
+`nesting.parent` 填上层合集的 `id` 就是子合集；空字符串表示顶层。`onlyFromParent` 为 `true` 时只有上层抽签能叫醒它。纯容器合集可以写 `"items": []`。
+
+旧版（schema 1、2、3）的包在导入时会自动升级；以前填过的合集也会在读取时补齐新字段。
 
 ## 注入位置为什么只有三个
 
@@ -163,6 +180,7 @@ SillyTavern/public/scripts/extensions/third-party/state-engine/
 - 内容是每份聊天自己的，不是全局的。
 - MVU 名字识别靠 `[InitVar]` 条目的顶层键；名字藏得很深的卡识别不出来，用「手动输入」。
 - 递归最多三层，由每个合集的三个开关控制。
+- 合集嵌套也最多三层，超过的部分不会继续往下抽。
 - 注入位置受扩展接口限制，只有三种。
 - 还没有批量文本导入（把一整段文字拆成条目）。
 - 条目编辑是即时保存的，没有撤销按钮；改坏了可以「导出此合集」留一份再改。

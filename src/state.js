@@ -194,6 +194,70 @@ export function bumpNonce(state, deckId) {
 }
 
 /**
+ * 合集树抽签：先抽「子合集」，再抽子合集的条目。
+ *
+ * - decks 里 parent === 当前合集 id 的，就是它的子合集。
+ * - 子合集按下级自己的 entryWeight 加权抽一个，然后对子合集继续抽。
+ * - 子合集抽中后，它自己的 current / hold / 注入照常生效；上层合集只负责「挑一组」。
+ * - 最多 maxDepth 层，visited 防环（A 的 parent 是 B、B 的 parent 是 A 时不会死循环）。
+ *
+ * 返回：
+ *   { ok, nested, deck, parentDeck, result } —— nested=true 表示这一抽是「抽中了子合集」，
+ *   deck 是最终抽到条目的那个合集，result 是 drawDeck 的返回值。
+ */
+export function drawDeckTree(state, decks, deckId, options = {}) {
+    const {
+        force = false,
+        cause = 'manual',
+        maxDepth = 3,
+        depth = 0,
+        visited = new Set(),
+    } = options;
+    const deck = (decks || []).find((item) => item && item.id === deckId);
+    if (!deck || visited.has(deckId) || depth > maxDepth) {
+        return { ok: false, nested: false, deck: deck || null, parentDeck: null, result: null, reason: 'invalid' };
+    }
+    const nextVisited = new Set(visited);
+    nextVisited.add(deckId);
+
+    const children = (decks || []).filter((item) => item && item.parent === deckId && item.enabled !== false);
+    if (children.length > 0 && depth < maxDepth) {
+        const rng = rngFor(state, deckId, 7);
+        const pool = children.map((child) => ({ ...child, weight: Number(child.entryWeight) || 0 }));
+        const picked = pickWithRng(pool, 1, rng)[0];
+        if (!picked) {
+            pushLedger(state, {
+                deck: deck.id,
+                deckName: deck.name,
+                cause,
+                picked: [],
+                note: '子合集的权重都是 0，没有可抽的',
+            });
+            return { ok: false, nested: false, deck, parentDeck: null, result: null, reason: 'empty' };
+        }
+        // 上层只记一笔「抽中了哪个子合集」，真正的条目账本由子合集自己写。
+        pushLedger(state, {
+            deck: deck.id,
+            deckName: deck.name,
+            cause: cause === 'manual' ? 'nested' : cause,
+            picked: [`→ ${picked.name}`],
+            note: '',
+        });
+        const childResult = drawDeckTree(state, decks, picked.id, {
+            force: true,
+            cause: cause === 'manual' ? 'nested' : cause,
+            maxDepth,
+            depth: depth + 1,
+            visited: nextVisited,
+        });
+        return { ok: true, nested: true, deck: picked, parentDeck: deck, result: childResult };
+    }
+
+    const result = drawDeck(state, deck, { force, cause });
+    return { ok: true, nested: false, deck, parentDeck: null, result };
+}
+
+/**
  * 到期检查：抽中的内容该不该在这一轮被丢掉。
  * mode='turns' 时，抽中那一轮算第 1 轮，过了 turns 轮就清空。
  * mode='forever' / 'ai' 不按轮数过期（'ai' 等模型发结束标记）。

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER } from '../src/pack.js';
-import { createState, drawDeck, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 
 let passed = 0;
@@ -50,7 +50,7 @@ function makeDeck(overrides = {}) {
 // ---------------------------------------------------------------------------
 
 section('包校验');
-test('schema 3 的合集可以通过', () => {
+test('schema 3 的合集可以通过并升级到当前版本', () => {
     const result = validatePack({
         schema: 3,
         id: 'ok',
@@ -58,7 +58,7 @@ test('schema 3 的合集可以通过', () => {
         items: [{ id: 'x', name: 'X', text: 'x' }],
     });
     assert.equal(result.ok, true);
-    assert.equal(result.pack.schema, 3);
+    assert.equal(result.pack.schema, 4);
     assert.equal(result.pack.items[0].weight, 1);
 });
 
@@ -74,7 +74,7 @@ test('旧 schema 2 会自动升级', () => {
         autoEvery: 5,
     });
     assert.equal(result.ok, true);
-    assert.equal(result.pack.schema, 3);
+    assert.equal(result.pack.schema, 4);
     assert.equal(result.pack.trigger.auto, true);
     assert.equal(result.pack.trigger.autoEvery, 5);
     assert.equal(result.pack.items[0].weight, 2);
@@ -86,8 +86,13 @@ test('缺 id 会报错', () => {
     assert.ok(result.errors.some((e) => e.includes('缺少 id')));
 });
 
-test('空 items 会报错', () => {
-    const result = validatePack({ schema: 3, id: 'x', items: [] });
+test('空 items 允许（纯容器合集靠子合集抽签）', () => {
+    const result = validatePack({ schema: 4, id: 'x', items: [] });
+    assert.equal(result.ok, true);
+});
+
+test('items 不是数组会报错', () => {
+    const result = validatePack({ schema: 4, id: 'x', items: 'nope' });
     assert.equal(result.ok, false);
 });
 
@@ -112,14 +117,14 @@ test('默认触发：手动开、关键词关', () => {
     assert.equal(deck.trigger.ai, false);
 });
 
-test('序列化输出 schema 3 且保留绑定/注入设置', () => {
+test('序列化输出当前 schema 且保留绑定/注入设置', () => {
     const deck = makeDeck({
         binding: { type: 'character', name: '沈微澜' },
         inject: { position: 'prompt', depth: 0, role: 'user' },
         keywords: ['换衣服'],
     });
     const out = serializePack(deck);
-    assert.equal(out.schema, 3);
+    assert.equal(out.schema, 4);
     assert.equal(out.binding.name, '沈微澜');
     assert.equal(out.inject.position, 'prompt');
     assert.equal(out.inject.role, 'user');
@@ -348,6 +353,60 @@ test('AI 结束时清空当前值', () => {
     assert.equal(endHold(state, deck), true);
     assert.equal(deckState(state, 'outfit').current.length, 0);
     assert.equal(endHold(state, deck), false);
+});
+
+// ---------------------------------------------------------------------------
+
+section('合集嵌套');
+test('schema 4：容器合集允许空条目', () => {
+    const result = validatePack({ schema: 4, id: 'box', name: '大合集', items: [] });
+    assert.equal(result.ok, true);
+    assert.equal(result.pack.items.length, 0);
+});
+
+test('嵌套字段默认值', () => {
+    const deck = makeDeck();
+    assert.equal(deck.parent, '');
+    assert.equal(deck.onlyFromParent, false);
+    assert.equal(deck.entryWeight, 1);
+});
+
+test('大合集抽签会落到子合集的条目', () => {
+    const state = createState('nest-seed', 3);
+    state.turn = 3;
+    const parent = makeDeck({ id: 'body', name: '身体', items: [], cooldown: 0 });
+    const child = makeDeck({
+        id: 'cervix',
+        name: '宫口',
+        parent: 'body',
+        cooldown: 0,
+        items: [
+            { id: 'x', name: 'X', text: 'x' },
+            { id: 'y', name: 'Y', text: 'y' },
+        ],
+    });
+    const tree = drawDeckTree(state, [parent, child], 'body', { force: true });
+    assert.equal(tree.ok, true);
+    assert.equal(tree.nested, true);
+    assert.equal(tree.deck.id, 'cervix');
+    assert.equal(deckState(state, 'cervix').current.length, 1);
+});
+
+test('entryWeight=0 的子合集不会被抽中', () => {
+    const state = createState('nest-zero', 1);
+    state.turn = 1;
+    const parent = makeDeck({ id: 'p', items: [], cooldown: 0 });
+    const off = makeDeck({ id: 'off', parent: 'p', entryWeight: 0, cooldown: 0 });
+    const tree = drawDeckTree(state, [parent, off], 'p', { force: true });
+    assert.equal(tree.ok, false);
+});
+
+test('成环时不会死循环', () => {
+    const state = createState('nest-cycle', 1);
+    const a = makeDeck({ id: 'a', parent: 'b', items: [], cooldown: 0 });
+    const b = makeDeck({ id: 'b', parent: 'a', items: [], cooldown: 0 });
+    const tree = drawDeckTree(state, [a, b], 'a', { force: true });
+    assert.equal(tree.ok, true);
 });
 
 // ---------------------------------------------------------------------------

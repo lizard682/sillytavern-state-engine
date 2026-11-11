@@ -19,6 +19,7 @@ import {
     DEFAULT_BINDING,
     DEFAULT_HOLD,
     DEFAULT_INJECT,
+    DEFAULT_NESTING,
     DEFAULT_RECURSION,
     DEFAULT_SCAN,
     DEFAULT_TRIGGER,
@@ -33,6 +34,7 @@ import {
     currentItems,
     deckState,
     drawDeck,
+    drawDeckTree,
     endHold,
     expireIfDue,
     hasCurrent,
@@ -136,6 +138,14 @@ function normalizeDeckShape(deck) {
         const turns = Number(deck.hold.turns);
         deck.hold.turns = Number.isFinite(turns) ? Math.max(1, Math.floor(turns)) : DEFAULT_HOLD.turns;
     }
+    if (typeof deck.parent !== 'string') {
+        deck.parent = DEFAULT_NESTING.parent;
+    }
+    if (typeof deck.onlyFromParent !== 'boolean') {
+        deck.onlyFromParent = DEFAULT_NESTING.onlyFromParent;
+    }
+    const entryWeight = Number(deck.entryWeight);
+    deck.entryWeight = Number.isFinite(entryWeight) ? Math.max(0, entryWeight) : DEFAULT_NESTING.entryWeight;
     if (!deck.inject) {
         deck.inject = { ...DEFAULT_INJECT };
     }
@@ -486,8 +496,8 @@ function refreshInjections() {
             ctx.setExtensionPrompt(key, '', 0, 0, false, 0);
         }
     }
-    // 导演提示只列此刻真的会生效的合集：绑定角色不在场就别让模型白申请。
-    const directorDecks = store.decks.filter((deck) => deck.enabled !== false && bindingActive(deck, ctx));
+    // 导演提示只列此刻真的会生效的合集：绑定角色不在场、或只能被上级抽中的子合集，都别让模型白申请。
+    const directorDecks = store.decks.filter((deck) => deck.enabled !== false && deck.onlyFromParent !== true && bindingActive(deck, ctx));
     const itemsByDeck = Object.fromEntries(store.decks.map((deck) => [deck.id, Array.isArray(deck.items) ? deck.items : []]));
     const director = buildDirectorPrompt(directorDecks, settings.aiTemplate, itemsByDeck);
     const aiDepth = Math.max(0, Number(settings.aiDepth) || 4);
@@ -696,6 +706,10 @@ function advanceOnGeneration() {
         if (deck.enabled === false || !bindingActive(deck, ctx, pendingInput)) {
             continue;
         }
+        // 「只能被上级抽中」的子合集，正常对话的自动/关键词/AI 都不碰它。
+        if (deck.onlyFromParent === true) {
+            continue;
+        }
         // 「只在递归阶段激活」的合集，普通触发时跳过。
         if ((deck.recursion || DEFAULT_RECURSION).delay === true) {
             continue;
@@ -715,11 +729,12 @@ function advanceOnGeneration() {
             continue;
         }
         // 自动/关键词/AI 都不是「用户主动要换」，同楼重生成要沿用上次结论。
-        const result = drawDeck(store.state, deck, {
+        const tree = drawDeckTree(store.state, store.decks, deck.id, {
             force: false,
             cause: dueMarker ? 'ai' : dueKeyword ? 'keyword' : 'auto',
         });
-        if (result.changed) {
+        const result = tree.result || null;
+        if (result?.changed) {
             if (dueKeyword) {
                 if (keywordResult.msgIndex === -2) {
                     ds.keywordFieldFired = true;
@@ -746,6 +761,10 @@ function advanceOnGeneration() {
         const nextFrontier = [];
         for (const deck of store.decks) {
             if (visited.has(deck.id) || deck.enabled === false || !bindingActive(deck, ctx)) {
+                continue;
+            }
+            // 只认上级合集的子合集，不参与内容递归。
+            if (deck.onlyFromParent === true) {
                 continue;
             }
             const recursion = deck.recursion || DEFAULT_RECURSION;
@@ -792,7 +811,11 @@ function drawOne(deckId, { reroll = false } = {}) {
     const ds = deckState(store.state, deckId);
     // 每按一次「抽/重抽」都推进一期随机流：同楼层同一个 nonce 只会得到同一个结果。
     ds.nonce = (Number(ds.nonce) || 0) + 1;
-    const result = drawDeck(store.state, deck, { force: true, cause: reroll ? 'reroll' : 'manual' });
+    const tree = drawDeckTree(store.state, store.decks, deckId, {
+        force: true,
+        cause: reroll ? 'reroll' : 'manual',
+    });
+    const result = tree.result || null;
     saveStore({ immediate: true });
     refreshInjections();
     refreshPanelLight();
@@ -817,14 +840,19 @@ function createDeck() {
         return;
     }
     const deck = {
-        schema: 3,
+        schema: 4,
         id: uniqueDeckId('deck'),
         name: '新合集',
         enabled: true,
+        parent: '',
+        onlyFromParent: false,
+        entryWeight: 1,
         binding: { ...DEFAULT_BINDING },
         trigger: { ...DEFAULT_TRIGGER },
         keywords: [],
         scan: { ...DEFAULT_SCAN },
+        recursion: { ...DEFAULT_RECURSION },
+        hold: { ...DEFAULT_HOLD },
         inject: { ...DEFAULT_INJECT },
         cooldown: 2,
         pick: 1,
@@ -901,6 +929,13 @@ function setDeckField(deckId, path, value) {
     if (!store || !deck) {
         return;
     }
+    if (path === 'parent') {
+        // 不许挂到自己身上，也不许挂到自己的后代下面（否则合集树成环，抽签永远出不来）。
+        if (value === deckId || isInSubtree(store.decks, value, deckId)) {
+            toast('warning', '不能把合集挂到它自己的下级里。');
+            return;
+        }
+    }
     const [head, tail] = path.split('.');
     if (tail) {
         deck[head] ||= {};
@@ -917,7 +952,32 @@ function setDeckField(deckId, path, value) {
     saveStore();
     refreshInjections();
     // 只更新会变的部分，避免整块重绘导致折叠状态和输入焦点丢失。
+    if (path === 'parent') {
+        // 父级变了，下拉选项和层级缩进都要重算，只能整块重绘。
+        renderPanel();
+        return;
+    }
     syncEditor(deck);
+}
+
+/** nodeId 是不是 rootId 的后代（沿 parent 链往上找）。 */
+function isInSubtree(decks, nodeId, rootId) {
+    if (!nodeId || !rootId) {
+        return false;
+    }
+    let cursor = decks.find((item) => item.id === nodeId);
+    const seen = new Set();
+    while (cursor?.parent) {
+        if (cursor.parent === rootId) {
+            return true;
+        }
+        if (seen.has(cursor.parent)) {
+            return false;
+        }
+        seen.add(cursor.parent);
+        cursor = decks.find((item) => item.id === cursor.parent);
+    }
+    return false;
 }
 
 /** 就地更新编辑区里依赖数据的部分（不重建 DOM）。 */
@@ -1075,6 +1135,15 @@ function importFiles(fileList) {
                 resetDeckState(store.state, pack.id);
             }
         }
+        // 跨包导入时上级可能不在：断链的合集自动回到顶层，别让它永远抽不出来。
+        const aliveIds = new Set(store.decks.map((deck) => deck.id));
+        for (const deck of store.decks) {
+            if (deck.parent && !aliveIds.has(deck.parent)) {
+                deck.parent = '';
+                deck.onlyFromParent = false;
+                errors.push(`「${deck.name}」的上级合集不在这份聊天里，已改为顶层`);
+            }
+        }
         saveStore({ immediate: true });
         refreshInjections();
         renderPanel();
@@ -1136,6 +1205,23 @@ function triggerSummary(deck) {
     return parts.join(' / ') || '无';
 }
 
+/** 合集在树里的层级：沿 parent 往上数，最多 3 层，防环。 */
+function deckDepth(decks, deck) {
+    let depth = 0;
+    let cursor = deck;
+    const seen = new Set([deck.id]);
+    while (cursor?.parent && depth < 3) {
+        const parent = decks.find((item) => item.id === cursor.parent);
+        if (!parent || seen.has(parent.id)) {
+            break;
+        }
+        seen.add(parent.id);
+        depth += 1;
+        cursor = parent;
+    }
+    return depth;
+}
+
 function renderSidebar(store) {
     const list = document.getElementById('se-deck-list');
     if (!list) {
@@ -1149,12 +1235,16 @@ function renderSidebar(store) {
     if (!selectedDeckId || !decks.some((deck) => deck.id === selectedDeckId)) {
         selectedDeckId = decks[0].id;
     }
-    list.innerHTML = decks.map((deck) => `
-        <button type="button" class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}">
-            <span class="se-deck-item-name">${escapeHtml(deck.name || '未命名')}</span>
+    list.innerHTML = decks.map((deck) => {
+        const depth = deckDepth(decks, deck);
+        const childCount = decks.filter((item) => item.parent === deck.id).length;
+        return `
+        <button type="button" class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
+            <span class="se-deck-item-name">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}</span>
             <span class="se-deck-item-meta">${escapeHtml(deck.binding?.name || triggerSummary(deck))}</span>
             <span class="se-deck-item-value">${escapeHtml(currentLabel(deck, store))}</span>
-        </button>`).join('');
+        </button>`;
+    }).join('');
 }
 
 function renderItems(deck) {
@@ -1209,6 +1299,12 @@ function renderEditor(store) {
         { value: 'manual', label: '手动输入' },
     ];
     const bindingSelect = bindingOptions.map((opt) => `<option value="${opt.value}" ${binding.type === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('');
+    // 上级候选：不能是自己，也不能是自己的后代（否则成环）。
+    const parentCandidates = store.decks.filter((item) => item.id !== deck.id && !isInSubtree(store.decks, item.id, deck.id));
+    const parentSelect = [
+        `<option value="">（顶层）</option>`,
+        ...parentCandidates.map((item) => `<option value="${escapeHtml(item.id)}" ${deck.parent === item.id ? 'selected' : ''}>${escapeHtml(item.name || item.id)}</option>`),
+    ].join('');
     const mvuHint = mvuNames.length > 0
         ? `检测到 MVU 角色：${mvuNames.join('、')}`
         : '这张卡没有检测到 MVU 角色（可以在世界书里放 [InitVar] 条目）。';
@@ -1249,6 +1345,10 @@ function renderEditor(store) {
                 <span>合集名称</span>
                 <input type="text" class="text_pole" data-deck-field="name" value="${escapeHtml(deck.name || '')}">
             </label>
+            <label class="se-field">
+                <span>上级合集</span>
+                <select class="text_pole" data-deck-field="parent">${parentSelect}</select>
+            </label>
             <label class="se-field se-field-binding">
                 <span>绑定</span>
                 <span class="se-binding-row">
@@ -1265,6 +1365,13 @@ function renderEditor(store) {
                 <span>冷却轮数</span>
                 <input type="number" class="text_pole" data-deck-field="cooldown" min="0" step="1" value="${cooldown}">
             </label>
+        </div>
+        <div class="se-form se-nest-row" ${deck.parent ? '' : 'hidden'}>
+            <label class="se-field">
+                <span>在上级里的权重</span>
+                <input type="number" class="text_pole" data-deck-field="entryWeight" min="0" step="1" value="${Number(deck.entryWeight) || 0}">
+            </label>
+            <label class="se-check"><input type="checkbox" data-deck-field="onlyFromParent" ${deck.onlyFromParent ? 'checked' : ''}><span>只能被上级抽中（正常对话不碰它）</span></label>
         </div>
         <div class="se-hint se-binding-hint">${escapeHtml(mvuHint)}</div>
 

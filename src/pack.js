@@ -12,9 +12,22 @@
  * - 注入位置学世界书：聊天里（带深度）/ 系统提示 / 提示词最前。
  */
 
-/** 当前格式版本。导入时接受 1 / 2 旧版并自动升级。 */
-export const PACK_SCHEMA = 3;
-const ACCEPTED_SCHEMA = [1, 2, 3];
+/** 当前格式版本。导入时接受 1 / 2 / 3 旧版并自动升级。 */
+export const PACK_SCHEMA = 4;
+const ACCEPTED_SCHEMA = [1, 2, 3, 4];
+
+/**
+ * 合集嵌套（schema 4）：
+ * - parent：上级合集的 id。空字符串 = 顶层合集。
+ *   顶层合集抽签时，如果它有子合集，会先抽一个子合集，再抽子合集里的条目。
+ * - onlyFromParent：只能被上级合集抽中时激活；正常楼层自动 / 关键词 / AI 判定都不碰它。
+ * - entryWeight：这个合集作为「别人家的子合集」时，被上级抽中的相对权重。
+ */
+export const DEFAULT_NESTING = {
+    parent: '',
+    onlyFromParent: false,
+    entryWeight: 1,
+};
 
 export const DEFAULT_TRIGGER = {
     manual: true,
@@ -161,6 +174,17 @@ function normalizeBinding(raw) {
     };
 }
 
+function normalizeNesting(raw) {
+    const n = isPlainObject(raw) ? raw : {};
+    const parent = asString(n.parent);
+    return {
+        // 上级 id 只接受合法格式；不合法就当顶层，避免导入一份坏包把整棵树带歪。
+        parent: /^[a-zA-Z0-9_-]{1,64}$/.test(parent) ? parent : '',
+        onlyFromParent: n.onlyFromParent === true,
+        entryWeight: Number.isFinite(Number(n.entryWeight)) ? Math.max(0, Number(n.entryWeight)) : 1,
+    };
+}
+
 /**
  * 把一条清单项整理成固定形状。
  * 允许作者只写字符串（会被当成标题），也允许写完整对象。
@@ -206,8 +230,8 @@ export function validatePack(raw) {
     } else if (RESERVED_IDS.has(id)) {
         errors.push(`id 不能用保留字「${id}」`);
     }
-    if (!Array.isArray(raw.items) || raw.items.length === 0) {
-        errors.push('items 必须是非空数组');
+    if (!Array.isArray(raw.items)) {
+        errors.push('items 必须是数组（可以是空数组：纯容器合集靠子合集抽签）');
     }
 
     const items = [];
@@ -240,6 +264,7 @@ export function validatePack(raw) {
             schema: PACK_SCHEMA,
             id,
             name: asString(raw.name) || id,
+            ...normalizeNesting(raw),
             binding: normalizeBinding(raw.binding),
             trigger: normalizeTrigger(raw.trigger, raw),
             keywords: normalizeKeywords(raw.keywords),
@@ -261,6 +286,7 @@ export function serializePack(pack) {
         schema: PACK_SCHEMA,
         id: pack.id,
         name: pack.name,
+        ...normalizeNesting(pack),
         binding: normalizeBinding(pack.binding),
         trigger: normalizeTrigger(pack.trigger),
         keywords: normalizeKeywords(pack.keywords),
