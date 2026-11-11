@@ -1410,6 +1410,12 @@ function renderEditor(store) {
                 </div>
             </div>
         </div>
+
+        <div class="se-ai-row" ${trigger.ai ? '' : 'hidden'}>
+            <div class="se-section-title">AI 判定补充说明</div>
+            <textarea class="text_pole" data-deck-field="aiPrompt" rows="2" placeholder="比如：只有在她准备出门时才申请换装。">${escapeHtml(deck.aiPrompt || '')}</textarea>
+            <div class="se-hint">模型会在回复末尾写标记，下一轮按标记抽。模板在底部「设置」里改。</div>
+        </div>
         </div>
         <div class="se-settings-col">
         <div class="se-section-title">被谁唤起</div>
@@ -1460,11 +1466,6 @@ function renderEditor(store) {
             </label>
         </div>
 
-        <div class="se-ai-row" ${trigger.ai ? '' : 'hidden'}>
-            <div class="se-section-title">AI 判定补充说明</div>
-            <textarea class="text_pole" data-deck-field="aiPrompt" rows="2" placeholder="比如：只有在她准备出门时才申请换装。">${escapeHtml(deck.aiPrompt || '')}</textarea>
-            <div class="se-hint">模型会在回复末尾写标记，下一轮按标记抽。模板在底部「设置」里改。</div>
-        </div>
         </div>
         </div>
 
