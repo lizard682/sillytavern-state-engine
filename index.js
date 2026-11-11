@@ -1336,7 +1336,7 @@ function renderEditor(store) {
                 <span>合集名称</span>
                 <input type="text" class="text_pole" data-deck-field="name" value="${escapeHtml(deck.name || '')}">
             </label>
-            <label class="se-field">
+            <label class="se-field" title="结构关系：上层合集抽签时先抽子合集，再让子合集抽自己的条目，最多三层。">
                 <span>上级合集</span>
                 <select class="text_pole" data-deck-field="parent">${parentSelect}</select>
             </label>
@@ -1401,12 +1401,13 @@ function renderEditor(store) {
         </div>
         </div>
         <div class="se-settings-col">
-        <div class="se-section-title">递归</div>
+        <div class="se-section-title">关键词连锁（不是上级结构）</div>
         <div class="se-checks se-recursion">
-            <label><input type="checkbox" data-recursion-field="canBeRecursed" ${recursion.canBeRecursed !== false ? 'checked' : ''}><span>可以被其它合集递归激活</span></label>
-            <label><input type="checkbox" data-recursion-field="canRecurse" ${recursion.canRecurse ? 'checked' : ''}><span>抽中后继续叫醒别的合集</span></label>
-            <label><input type="checkbox" data-recursion-field="delay" ${recursion.delay ? 'checked' : ''}><span>只在递归阶段激活</span></label>
+            <label><input type="checkbox" data-recursion-field="canBeRecursed" ${recursion.canBeRecursed !== false ? 'checked' : ''}><span>允许别的合集把它带出来</span></label>
+            <label><input type="checkbox" data-recursion-field="canRecurse" ${recursion.canRecurse ? 'checked' : ''}><span>它抽中后继续带出别的合集</span></label>
+            <label><input type="checkbox" data-recursion-field="delay" ${recursion.delay ? 'checked' : ''}><span>只在连锁时出场</span></label>
         </div>
+        <div class="se-hint">A 抽中的内容里出现了 B 的关键词，就顺便把 B 也抽出来，最多三层。想做大合集套子合集，用上面的「上级合集」。</div>
 
         <div class="se-section-title">抽中的内容持续多久</div>
         <div class="se-form se-hold-form">
