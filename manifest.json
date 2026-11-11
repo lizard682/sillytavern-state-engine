@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "lizard682",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "homePage": "https://github.com/lizard682/sillytavern-state-engine",
   "auto_update": false,
   "minimum_client_version": "1.19.0",

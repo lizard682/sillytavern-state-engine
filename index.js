@@ -1417,7 +1417,7 @@ function renderEditor(store) {
         <div class="se-summon-list">
             ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-summon-by="${escapeHtml(item.id)}" ${(summon.by || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
         </div>
-        <label class="se-checks"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
+        <label class="se-checks se-check-wide"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
 
         <div class="se-section-title">抽中的内容持续多久</div>
         <div class="se-form se-hold-form">

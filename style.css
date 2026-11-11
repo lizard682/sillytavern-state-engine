@@ -567,6 +567,24 @@
     opacity: 0.85;
 }
 
+/* 长文案的单个勾选：勾选框固定在首行，文字在右边自然换行。 */
+#state-engine-panel .se-checks label.se-check-wide {
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+    gap: 6px;
+}
+
+#state-engine-panel .se-checks label.se-check-wide input {
+    flex: 0 0 auto;
+    margin-top: 3px;
+}
+
+#state-engine-panel .se-checks label.se-check-wide span {
+    flex: 1;
+    line-height: 1.5;
+}
+
 /* 「被谁唤起」：一列合集勾选，窄面板也能读。 */
 #state-engine-panel .se-summon-list {
     display: flex;
@@ -612,6 +630,8 @@
     border-radius: 2px;
     font-size: 12px;
     padding: 3px 10px;
+    white-space: nowrap;
+    flex: 0 0 auto;
 }
 
 #state-engine-panel .se-deck-settings > summary,
