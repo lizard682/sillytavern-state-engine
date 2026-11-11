@@ -1297,6 +1297,7 @@ function renderEditor(store) {
     const inject = deck.inject || DEFAULT_INJECT;
     const scan = deck.scan || DEFAULT_SCAN;
     const summon = deck.summon || DEFAULT_SUMMON;
+    const summonNames = (summon.by || []).map((id) => store.decks.find((item) => item.id === id)?.name || id);
     const hold = deck.hold || DEFAULT_HOLD;
     const binding = deck.binding || DEFAULT_BINDING;
     const ds = deckState(store.state, deck.id);
@@ -1420,9 +1421,12 @@ function renderEditor(store) {
         <div class="se-settings-col">
         <div class="se-section-title">被谁唤起</div>
         <div class="se-hint">勾中的合集抽中时，会顺手把我抽一次（最多三层，不会循环）。不勾就是没人能唤起我。</div>
-        <div class="se-summon-list">
-            ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-summon-by="${escapeHtml(item.id)}" ${(summon.by || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
-        </div>
+        <details class="se-multi-select">
+            <summary id="se-summon-summary" title="${escapeHtml(summonNames.join('、'))}">${escapeHtml(summonNames.length ? `已选 ${summonNames.length} 个：${summonNames.join('、')}` : '还没有合集能唤起它，点这里选择')}</summary>
+            <div class="se-summon-list">
+                ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-summon-by="${escapeHtml(item.id)}" ${(summon.by || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
+            </div>
+        </details>
         <label class="se-checks se-check-wide"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
 
         <div class="se-section-title">抽中的内容持续多久</div>
@@ -1890,6 +1894,14 @@ function bindPanelEvents() {
                 .filter((el) => el.checked)
                 .map((el) => el.dataset.summonBy);
             setDeckField(deckId, 'summon.by', by);
+            const fresh = getStore();
+            const freshDeck = fresh?.decks.find((item) => item.id === deckId);
+            const names = (freshDeck?.summon?.by || []).map((id) => fresh.decks.find((item) => item.id === id)?.name || id);
+            const summary = document.getElementById('se-summon-summary');
+            if (summary) {
+                summary.textContent = names.length ? `已选 ${names.length} 个：${names.join('、')}` : '还没有合集能唤起它，点这里选择';
+                summary.title = names.join('、');
+            }
         } else if ('summonOnly' in target.dataset) {
             setDeckField(deckId, 'summon.only', target.checked);
         } else if (target.dataset.scanField) {
