@@ -10,3 +10,6 @@ tools/inspect-wi.mjs
 .DS_Store
 Thumbs.db
 node_modules/
+
+# oily-ui 过程文件
+.oil-ui/

@@ -63,6 +63,7 @@ const BUTTON_ID = 'state-engine-button';
 let context;
 let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4 };
 let selectedDeckId = null;
+let airExpanded = false;
 
 // ---------------------------------------------------------------------------
 // 基础工具
@@ -1004,14 +1005,8 @@ function syncEditor(deck) {
     if (value) {
         value.textContent = currentLabel(deck, store);
     }
-    // 冷却条数也在这里更新，否则抽完之后要等整块重绘才变。
-    const meta = root.querySelector('.se-current-meta');
-    if (meta) {
-        const cooldown = Math.max(0, Number(deck.cooldown) || 0);
-        const recent = deckState(store.state, deck.id).recent || [];
-        const cooling = cooldown > 0 ? Math.min(recent.length, cooldown) : 0;
-        meta.textContent = `冷却中：${cooling > 0 ? `${cooling} 条` : '无'}`;
-    }
+    // 本轮上场槽与抽条预览：抽完立刻反映，不用等整块重绘。
+    renderAir(store, airExpanded);
     const count = root.querySelector('.se-items-count');
     if (count) {
         count.textContent = `${(deck.items || []).length} 条`;
@@ -1248,25 +1243,32 @@ function renderSidebar(store) {
 }
 
 function renderItems(deck) {
-    const rows = (deck.items || []).map((item) => `
+    const items = deck.items || [];
+    const maxWeight = Math.max(1, ...items.map((item) => Math.max(0, Number(item.weight) || 0)));
+    const rows = items.map((item) => {
+        const weight = Math.max(0, Number(item.weight) || 0);
+        const pct = Math.max(2, Math.min(100, Math.round((weight / maxWeight) * 100)));
+        return `
         <div class="se-item-row" data-item="${escapeHtml(item.id)}">
-            <input type="text" class="text_pole se-item-name" data-item-field="name" value="${escapeHtml(item.name || '')}" placeholder="条目名称">
-            <textarea class="text_pole se-item-text" data-item-field="text" rows="2" placeholder="这一条要交给 AI 的内容">${escapeHtml(item.text || '')}</textarea>
-            <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="1" value="${Number(item.weight) || 0}" title="相对权重：1 是基准，0 表示永不出现">
-            <button type="button" class="menu_button se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
-        </div>`).join('');
+            <div class="se-item-main" data-action="toggle-item">
+                <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}</span>
+                <span class="se-item-bar"><i style="width:${pct}%"></i></span>
+                <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="1" value="${weight}" title="相对权重：1 是基准，0 表示永不出现">
+                <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
+            </div>
+            <div class="se-item-edit">
+                <input type="text" class="text_pole se-item-name" data-item-field="name" value="${escapeHtml(item.name || '')}" placeholder="条目名称">
+                <textarea class="text_pole se-item-text" data-item-field="text" rows="3" placeholder="这一条要交给 AI 的内容">${escapeHtml(item.text || '')}</textarea>
+            </div>
+        </div>`;
+    }).join('');
     return `
         <div class="se-items">
-            <div class="se-item-row se-item-head">
-                <span>名称</span>
-                <span>内容</span>
-                <span title="相对权重：1 是基准，3 大约是 1 的三倍；0 表示永不出现">权重</span>
-                <span></span>
-            </div>
             ${rows || '<div class="se-items-empty">还没有条目。点下面的「+ 添加条目」。</div>'}
         </div>
         <div class="se-items-foot">
             <button type="button" class="menu_button" data-action="add-item" data-deck="${escapeHtml(deck.id)}">+ 添加条目</button>
+            <span class="se-items-hint">点一行展开改名和内容</span>
         </div>`;
 }
 
@@ -1320,24 +1322,13 @@ function renderEditor(store) {
     }
 
     root.innerHTML = `
-        <div class="se-editor-head">            <label class="se-switch"><input type="checkbox" data-deck-field="enabled" ${deck.enabled === false ? '' : 'checked'}><span>启用这个合集</span></label>
-            <div class="se-editor-actions">
-                <button type="button" class="menu_button" data-action="draw" data-deck="${escapeHtml(deck.id)}">抽一次</button>
-                <button type="button" class="menu_button" data-action="reroll" data-deck="${escapeHtml(deck.id)}">重抽</button>
-                <button type="button" class="menu_button" data-action="clear" data-deck="${escapeHtml(deck.id)}">清空记录</button>
-                <button type="button" class="menu_button" data-action="export-deck" data-deck="${escapeHtml(deck.id)}">导出此合集</button>
-                <button type="button" class="menu_button se-danger" data-action="delete-deck" data-deck="${escapeHtml(deck.id)}">删除合集</button>
-            </div>
-        </div>
-
-        <div class="se-current">
-            <span class="se-current-label">当前值</span>
-            <span class="se-current-value">${escapeHtml(currentLabel(deck, store))}</span>
-            <span class="se-current-meta">冷却中：${cooling > 0 ? `${cooling} 条` : '无'}</span>
+        <div class="se-items-block">
+            <div class="se-items-title"><span class="se-items-deck">${escapeHtml(deck.name || deck.id)}</span><span class="se-items-count">${(deck.items || []).length} 条</span></div>
+            ${renderItems(deck)}
         </div>
 
         <details class="se-deck-settings">
-            <summary>合集设置</summary>
+            <summary>合集设置：名称、绑定、抽取规则、触发方式、注入位置</summary>
         <div class="se-settings-grid">
         <div class="se-settings-col">
         <div class="se-form">
@@ -1466,16 +1457,14 @@ function renderEditor(store) {
         </div>
         </div>
 
-        </details>
-
-        <div class="se-items-block">
-            <div class="se-section-title se-items-title"><span>条目</span><span class="se-items-count">${(deck.items || []).length} 条</span></div>
-            ${renderItems(deck)}
+        <div class="se-deck-ops">
+            <label class="se-check"><input type="checkbox" data-deck-field="enabled" ${deck.enabled === false ? '' : 'checked'}><span>启用这个合集</span></label>
+            <span class="se-ops-spacer"></span>
+            <button type="button" class="menu_button" data-action="export-deck" data-deck="${escapeHtml(deck.id)}">导出此合集</button>
+            <button type="button" class="menu_button" data-action="clear" data-deck="${escapeHtml(deck.id)}">清空记录</button>
+            <button type="button" class="menu_button se-danger" data-action="delete-deck" data-deck="${escapeHtml(deck.id)}">删除合集</button>
         </div>
 
-        <details class="se-ledger se-inject-preview-block">
-            <summary>本轮注入预览（真正发给 AI 的内容）</summary>
-            <pre id="se-inject-preview"></pre>
         </details>
     `;
 
@@ -1519,8 +1508,10 @@ function renderPanel() {
         if (editor) {
             editor.innerHTML = '<div class="se-empty"><p>先打开一个聊天。</p><p>合集内容跟着聊天走，没有聊天时不会创建记录。</p></div>';
         }
+        renderAir(null);
         return;
     }
+    renderAir(store, airExpanded);
     renderSidebar(store);
     renderEditor(store);
     updateInjectPreview();
@@ -1530,19 +1521,28 @@ function buildPanel() {
     return `
         <div id="${PANEL_ID}" class="drawer-content closedDrawer">
             <div class="se-head">
-                <div class="se-title">状态引擎 <span class="se-sub">清单抽签框架</span></div>
+                <div class="se-title">状态引擎 <span class="se-sub">本轮上场</span></div>
                 <div class="se-head-actions">
-                    <label class="se-switch"><input type="checkbox" id="se-enabled"><span>启用插件</span></label>
+                    <label class="se-switch"><input type="checkbox" id="se-enabled"><span>启用</span></label>
                     <button type="button" class="menu_button" data-action="new-deck">新建合集</button>
                     <button type="button" class="menu_button" data-action="import">导入</button>
                     <button type="button" class="menu_button" data-action="export-all">导出全部</button>
                     <input type="file" id="se-file" accept=".json,application/json" multiple hidden>
                 </div>
             </div>
+
+            <div id="se-air" class="se-air"></div>
+
             <div class="se-body">
                 <div id="se-deck-list" class="se-sidebar"></div>
                 <div id="se-editor" class="se-editor"></div>
             </div>
+
+            <div class="se-takebar">
+                <span id="se-take-preview" class="se-take-preview"></span>
+                <button type="button" class="menu_button se-take-btn" data-action="draw">抽一条 <kbd>空格</kbd></button>
+            </div>
+
             <details class="se-ledger">
                 <summary>后台记录</summary>
                 <pre id="se-ledger-text"></pre>
@@ -1559,8 +1559,109 @@ function buildPanel() {
                 </label>
                 <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认模板</button>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
+                <details class="se-ledger se-inject-preview-block">
+                    <summary>本轮注入预览（真正发给 AI 的内容）</summary>
+                    <pre id="se-inject-preview"></pre>
+                </details>
             </details>
         </div>`;
+}
+
+// 合集 → 父 → 祖父的名字链（最多三层）。
+function deckChain(decks, deck) {
+    const names = [deck.name || deck.id];
+    let cursor = deck;
+    let guard = 0;
+    while (cursor?.parent && guard < 3) {
+        const parent = decks.find((item) => item.id === cursor.parent);
+        if (!parent) {
+            break;
+        }
+        names.unshift(parent.name || parent.id);
+        cursor = parent;
+        guard += 1;
+    }
+    return names;
+}
+
+// 本轮上场：每一条正在生效的内容一行。
+function airEntries(store) {
+    if (!store) {
+        return [];
+    }
+    const turn = Number(store.state?.turn) || 0;
+    return (store.decks || [])
+        .filter((deck) => deck.enabled !== false)
+        .map((deck) => {
+            const ds = deckState(store.state, deck.id);
+            const current = Array.isArray(ds.current) ? ds.current : [];
+            if (current.length === 0) {
+                return null;
+            }
+            const items = deck.items || [];
+            const names = current.map((id) => items.find((item) => item.id === id)?.name || id);
+            const hold = deck.hold || DEFAULT_HOLD;
+            const total = Math.max(1, Number(hold.turns) || 1);
+            const start = Number(ds.holdStart);
+            const used = Number.isFinite(start) && start >= 0 ? Math.max(0, turn - start) : 0;
+            const left = hold.mode === 'turns' ? Math.max(0, total - used) : null;
+            const pct = hold.mode === 'turns' ? Math.max(0, Math.min(100, Math.round((left / total) * 100))) : 100;
+            return { deck, chain: deckChain(store.decks, deck), names, hold, left, pct, current };
+        })
+        .filter(Boolean);
+}
+
+function renderAir(store, expanded = false) {
+    const air = document.getElementById('se-air');
+    if (!air) {
+        return;
+    }
+    if (!store) {
+        air.innerHTML = '<div class="se-air-empty">先打开一个聊天。</div>';
+        return;
+    }
+    const entries = airEntries(store);
+    const visible = expanded ? entries : entries.slice(0, 3);
+    const hiddenCount = Math.max(0, entries.length - 3);
+    const rows = visible.map((entry) => {
+        const path = [...entry.chain, entry.names.join('、')].map(escapeHtml).join(' › ');
+        let timeMark;
+        if (entry.hold.mode === 'turns') {
+            timeMark = `<span class="se-air-bar"><i style="width:${entry.pct}%"></i></span><span class="se-air-left">剩 ${entry.left} 楼</span>`;
+        } else if (entry.hold.mode === 'ai') {
+            timeMark = `<span class="se-air-left se-air-dim">由 AI 结束</span>`;
+        } else {
+            timeMark = `<span class="se-air-left se-air-dim">— 常驻 —</span>`;
+        }
+        return `
+            <div class="se-air-row">
+                <span class="se-air-path">${path}</span>
+                ${timeMark}
+            </div>`;
+    }).join('');
+    const more = hiddenCount > 0
+        ? `<button type="button" class="se-air-more" data-action="toggle-air">${expanded ? '收起' : `＋ 另有 ${hiddenCount} 条`}</button>`
+        : '';
+    air.innerHTML = `
+        <div class="se-air-head">
+            <span class="se-air-lamp ${entries.length > 0 ? 'on' : ''}"></span>
+            <span class="se-air-label">本轮上场</span>
+            <span class="se-air-count">${entries.length > 0 ? `${entries.length} 条在播` : ''}</span>
+        </div>
+        ${rows || '<div class="se-air-empty">本轮还没有上场的内容。点下面的「抽一条」。</div>'}
+        ${more}
+    `;
+
+    const preview = document.getElementById('se-take-preview');
+    if (preview) {
+        const deck = store.decks.find((item) => item.id === selectedDeckId);
+        if (!deck) {
+            preview.textContent = '待抽 · 先在左边选一个合集';
+        } else {
+            const totalWeight = (deck.items || []).reduce((sum, item) => sum + Math.max(0, Number(item.weight) || 0), 0);
+            preview.innerHTML = `待抽 · <b>${escapeHtml(deck.name || deck.id)}</b> · ${deck.items?.length || 0} 条可选 · 权重合计 ${totalWeight}`;
+        }
+    }
 }
 
 function ensureTopBarEntry() {
@@ -1663,6 +1764,28 @@ function bindPanelEvents() {
         togglePanel();
     });
 
+    // 空格 = 抽一条（面板打开、焦点不在输入框时）。
+    if (!bindPanelEvents.hotkeyBound) {
+        bindPanelEvents.hotkeyBound = true;
+        document.addEventListener('keydown', (event) => {
+            if (event.code !== 'Space' || event.repeat) {
+                return;
+            }
+            const panel = document.getElementById(PANEL_ID);
+            if (!panel?.classList.contains('openDrawer')) {
+                return;
+            }
+            const el = document.activeElement;
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) {
+                return;
+            }
+            event.preventDefault();
+            if (selectedDeckId) {
+                drawOne(selectedDeckId, {});
+            }
+        });
+    }
+
     root.addEventListener('click', (event) => {
         const button = event.target.closest('[data-action]');
         if (!button) {
@@ -1682,6 +1805,20 @@ function bindPanelEvents() {
             refreshInjections();
             renderPanel();
             toast('success', 'AI 判定模板已恢复默认');
+        } else if (action === 'toggle-air') {
+            airExpanded = !airExpanded;
+            renderAir(getStore(), airExpanded);
+        } else if (action === 'toggle-item') {
+            if (event.target.closest('input, textarea')) {
+                return;
+            }
+            const row = button.closest('.se-item-row');
+            const wasOpen = row?.classList.contains('open');
+            root.querySelectorAll('.se-item-row.open').forEach((el) => el.classList.remove('open'));
+            if (row && !wasOpen) {
+                row.classList.add('open');
+                row.querySelector('.se-item-text')?.focus();
+            }
         } else if (action === 'select-deck') {
             selectedDeckId = deckId;
             renderPanel();
