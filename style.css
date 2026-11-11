@@ -568,19 +568,22 @@
 }
 
 /* 长文案的单个勾选：勾选框固定在首行，文字在右边自然换行。 */
-#state-engine-panel .se-checks label.se-check-wide {
+#state-engine-panel .se-check-wide {
     display: flex;
     align-items: flex-start;
     width: 100%;
     gap: 6px;
+    opacity: 0.85;
+    font-size: 13px;
+    padding: 2px 0;
 }
 
-#state-engine-panel .se-checks label.se-check-wide input {
+#state-engine-panel .se-check-wide input {
     flex: 0 0 auto;
     margin-top: 3px;
 }
 
-#state-engine-panel .se-checks label.se-check-wide span {
+#state-engine-panel .se-check-wide span {
     flex: 1;
     line-height: 1.5;
 }
