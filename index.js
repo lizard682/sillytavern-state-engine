@@ -22,6 +22,7 @@ import {
     DEFAULT_NESTING,
     DEFAULT_RECURSION,
     DEFAULT_SCAN,
+    DEFAULT_SUMMON,
     DEFAULT_TRIGGER,
     SCAN_FIELDS,
     normalizeKeywords,
@@ -129,6 +130,12 @@ function normalizeDeckShape(deck) {
     }
     if (!deck.recursion) {
         deck.recursion = { ...DEFAULT_RECURSION };
+    }
+    if (!deck.summon || typeof deck.summon !== 'object') {
+        deck.summon = { ...DEFAULT_SUMMON, by: [] };
+    } else {
+        deck.summon.by = Array.isArray(deck.summon.by) ? [...new Set(deck.summon.by.filter((id) => typeof id === 'string'))] : [];
+        deck.summon.only = deck.summon.only === true;
     }
     if (!deck.hold) {
         deck.hold = { ...DEFAULT_HOLD };
@@ -498,7 +505,7 @@ function refreshInjections() {
         }
     }
     // 导演提示只列此刻真的会生效的合集：绑定角色不在场、或只能被上级抽中的子合集，都别让模型白申请。
-    const directorDecks = store.decks.filter((deck) => deck.enabled !== false && deck.onlyFromParent !== true && bindingActive(deck, ctx));
+    const directorDecks = store.decks.filter((deck) => deck.enabled !== false && deck.onlyFromParent !== true && deck.summon?.only !== true && bindingActive(deck, ctx));
     const itemsByDeck = Object.fromEntries(store.decks.map((deck) => [deck.id, Array.isArray(deck.items) ? deck.items : []]));
     const director = buildDirectorPrompt(directorDecks, settings.aiTemplate, itemsByDeck);
     const aiDepth = Math.max(0, Number(settings.aiDepth) || 4);
@@ -711,8 +718,8 @@ function advanceOnGeneration() {
         if (deck.onlyFromParent === true) {
             continue;
         }
-        // 「只在递归阶段激活」的合集，普通触发时跳过。
-        if ((deck.recursion || DEFAULT_RECURSION).delay === true) {
+        // 「只在被唤起时出场」的合集，普通对话的自动/关键词/AI 都不碰它。
+        if ((deck.summon || DEFAULT_SUMMON).only === true) {
             continue;
         }
         const trigger = deck.trigger || DEFAULT_TRIGGER;
@@ -747,44 +754,10 @@ function advanceOnGeneration() {
         }
     }
 
-    // 递归：只让「抽中后继续叫醒别的合集」的合集作为起点，最多三层。
-    const MAX_RECURSION_ROUNDS = 3;
-    const visited = new Set(fired);
-    let frontier = fired.filter((id) => {
-        const deck = store.decks.find((item) => item.id === id);
-        return (deck?.recursion || DEFAULT_RECURSION).canRecurse === true;
-    });
-    for (let round = 0; round < MAX_RECURSION_ROUNDS && frontier.length > 0; round += 1) {
-        const sourceText = frontier.map((id) => {
-            const target = store.decks.find((deck) => deck.id === id);
-            return target ? currentItems(store.state, target).map((item) => item.text).join('\n') : '';
-        }).join('\n');
-        const nextFrontier = [];
-        for (const deck of store.decks) {
-            if (visited.has(deck.id) || deck.enabled === false || !bindingActive(deck, ctx)) {
-                continue;
-            }
-            // 只认上级合集的子合集，不参与内容递归。
-            if (deck.onlyFromParent === true) {
-                continue;
-            }
-            const recursion = deck.recursion || DEFAULT_RECURSION;
-            if (recursion.canBeRecursed === false) {
-                continue;
-            }
-            if (deck.trigger?.keyword !== true || (deck.keywords || []).length === 0) {
-                continue;
-            }
-            if (!deck.keywords.some((kw) => keywordHit(sourceText, kw))) {
-                continue;
-            }
-            drawDeck(store.state, deck, { force: false, cause: 'recursive' });
-            visited.add(deck.id);
-            if (recursion.canRecurse === true) {
-                nextFrontier.push(deck.id);
-            }
-        }
-        frontier = nextFrontier;
+    // 唤起：谁抽中了，就顺手把「被它唤起」的合集各抽一次，最多三层。
+    const summoned = applySummons(store, ctx, fired);
+    if (summoned.length > 0) {
+        fired.push(...summoned);
     }
     if (freshMarkers.length > 0) {
         store.state.markerFloor = floor;
@@ -798,6 +771,40 @@ function advanceOnGeneration() {
 // ---------------------------------------------------------------------------
 // 合集操作
 // ---------------------------------------------------------------------------
+
+// 谁抽中了，就把「被它唤起」的合集各抽一次，最多三层。
+function applySummons(store, ctx, seededIds) {
+    const MAX_SUMMON_ROUNDS = 3;
+    const visited = new Set(seededIds);
+    const fired = [];
+    let frontier = seededIds.slice();
+    for (let round = 0; round < MAX_SUMMON_ROUNDS && frontier.length > 0; round += 1) {
+        const nextFrontier = [];
+        for (const sourceId of frontier) {
+            for (const deck of store.decks) {
+                if (visited.has(deck.id) || deck.enabled === false || !bindingActive(deck, ctx)) {
+                    continue;
+                }
+                // 只认上级合集的子合集，不参与「被唤起」。
+                if (deck.onlyFromParent === true) {
+                    continue;
+                }
+                const summon = deck.summon || DEFAULT_SUMMON;
+                if (!Array.isArray(summon.by) || !summon.by.includes(sourceId)) {
+                    continue;
+                }
+                const result = drawDeck(store.state, deck, { force: false, cause: 'summoned' });
+                visited.add(deck.id);
+                nextFrontier.push(deck.id);
+                if (result?.changed) {
+                    fired.push(deck.id);
+                }
+            }
+        }
+        frontier = nextFrontier;
+    }
+    return fired;
+}
 
 function drawOne(deckId, { reroll = false } = {}) {
     if (!liveContext()?.chatId) {
@@ -817,6 +824,9 @@ function drawOne(deckId, { reroll = false } = {}) {
         cause: reroll ? 'reroll' : 'manual',
     });
     const result = tree.result || null;
+    // 手动抽也算一次「抽中」，把「被它唤起」的合集顺带抽出来。
+    const seeded = [deckId, ...(tree.nested && tree.deck?.id ? [tree.deck.id] : [])];
+    applySummons(store, liveContext(), seeded);
     saveStore({ immediate: true });
     refreshInjections();
     refreshPanelLight();
@@ -853,6 +863,7 @@ function createDeck() {
         keywords: [],
         scan: { ...DEFAULT_SCAN },
         recursion: { ...DEFAULT_RECURSION },
+        summon: { by: [], only: false },
         hold: { ...DEFAULT_HOLD },
         inject: { ...DEFAULT_INJECT },
         cooldown: 2,
@@ -1285,7 +1296,7 @@ function renderEditor(store) {
     const trigger = deck.trigger || DEFAULT_TRIGGER;
     const inject = deck.inject || DEFAULT_INJECT;
     const scan = deck.scan || DEFAULT_SCAN;
-    const recursion = deck.recursion || DEFAULT_RECURSION;
+    const summon = deck.summon || DEFAULT_SUMMON;
     const hold = deck.hold || DEFAULT_HOLD;
     const binding = deck.binding || DEFAULT_BINDING;
     const ds = deckState(store.state, deck.id);
@@ -1401,13 +1412,12 @@ function renderEditor(store) {
         </div>
         </div>
         <div class="se-settings-col">
-        <div class="se-section-title">关键词连锁（不是上级结构）</div>
-        <div class="se-checks se-recursion">
-            <label><input type="checkbox" data-recursion-field="canBeRecursed" ${recursion.canBeRecursed !== false ? 'checked' : ''}><span>允许别的合集把它带出来</span></label>
-            <label><input type="checkbox" data-recursion-field="canRecurse" ${recursion.canRecurse ? 'checked' : ''}><span>它抽中后继续带出别的合集</span></label>
-            <label><input type="checkbox" data-recursion-field="delay" ${recursion.delay ? 'checked' : ''}><span>只在连锁时出场</span></label>
+        <div class="se-section-title">被谁唤起</div>
+        <div class="se-hint">勾中的合集抽中时，会顺手把我抽一次（最多三层，不会循环）。不勾就是没人能唤起我。</div>
+        <div class="se-summon-list">
+            ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-summon-by="${escapeHtml(item.id)}" ${(summon.by || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
         </div>
-        <div class="se-hint">A 抽中的内容里出现了 B 的关键词，就顺便把 B 也抽出来，最多三层。想做大合集套子合集，用上面的「上级合集」。</div>
+        <label class="se-checks"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
 
         <div class="se-section-title">抽中的内容持续多久</div>
         <div class="se-form se-hold-form">
@@ -1873,8 +1883,14 @@ function bindPanelEvents() {
             const field = target.dataset.triggerField;
             const value = target.type === 'checkbox' ? target.checked : Math.max(1, Number(target.value) || 3);
             setDeckField(deckId, `trigger.${field}`, value);
-        } else if (target.dataset.recursionField) {
-            setDeckField(deckId, `recursion.${target.dataset.recursionField}`, target.checked);
+        } else if (target.dataset.summonBy) {
+            const root = document.getElementById('se-editor');
+            const by = [...(root?.querySelectorAll('[data-summon-by]') || [])]
+                .filter((el) => el.checked)
+                .map((el) => el.dataset.summonBy);
+            setDeckField(deckId, 'summon.by', by);
+        } else if ('summonOnly' in target.dataset) {
+            setDeckField(deckId, 'summon.only', target.checked);
         } else if (target.dataset.scanField) {
             const root = document.getElementById('se-editor');
             const fields = [...(root?.querySelectorAll('[data-scan-field]') || [])]

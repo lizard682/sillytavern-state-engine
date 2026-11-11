@@ -71,6 +71,18 @@ export const DEFAULT_RECURSION = {
 };
 
 /**
+ * 「被谁唤起」：直接写关系，不靠关键词。
+ * - by: 哪些合集抽中时，顺手把我抽一次
+ * - only: 我只在被人唤起时出场，平时的自动/手动/关键词都不碰我
+ */
+export const DEFAULT_SUMMON = {
+    by: [],
+    only: false,
+};
+
+const SUMMON_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/**
  * 抽中之后，这条内容在对话里「保持」多久：
  * - mode: 'turns' → 持续 turns 轮（抽中那一轮算第 1 轮）
  * - mode: 'forever' → 一直保留，直到重抽 / 清空记录
@@ -162,6 +174,17 @@ function normalizeRecursion(raw) {
         canBeRecursed: r.canBeRecursed !== false,
         canRecurse: r.canRecurse === true,
         delay: r.delay === true,
+    };
+}
+
+function normalizeSummon(raw) {
+    const s = isPlainObject(raw) ? raw : {};
+    const by = Array.isArray(s.by)
+        ? [...new Set(s.by.map((id) => asString(id)).filter((id) => SUMMON_ID_RE.test(id) && !RESERVED_IDS.has(id)))]
+        : [];
+    return {
+        by,
+        only: s.only === true,
     };
 }
 
@@ -270,6 +293,7 @@ export function validatePack(raw) {
             keywords: normalizeKeywords(raw.keywords),
             scan: normalizeScan(raw.scan),
             recursion: normalizeRecursion(raw.recursion),
+            summon: normalizeSummon(raw.summon),
             hold: normalizeHold(raw.hold),
             inject: normalizeInject(raw.inject),
             cooldown: asInt(raw.cooldown, 2, 0),
@@ -292,6 +316,7 @@ export function serializePack(pack) {
         keywords: normalizeKeywords(pack.keywords),
         scan: normalizeScan(pack.scan),
         recursion: normalizeRecursion(pack.recursion),
+        summon: normalizeSummon(pack.summon),
         hold: normalizeHold(pack.hold),
         inject: normalizeInject(pack.inject),
         cooldown: asInt(pack.cooldown, 2, 0),

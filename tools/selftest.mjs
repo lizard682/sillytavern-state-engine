@@ -304,6 +304,35 @@ test('DEFAULT_TRIGGER 不被测试污染', () => {
 
 // ---------------------------------------------------------------------------
 
+section('被谁唤起');
+test('summon 默认：没人能唤起，也不限制自己出场', () => {
+    const deck = makeDeck();
+    assert.deepEqual(deck.summon, { by: [], only: false });
+});
+
+test('summon.by 只保留合法 id，去重', () => {
+    const deck = makeDeck({ summon: { by: ['a', 'a', 'b', '__proto__', 'bad id!', 42], only: true } });
+    assert.deepEqual(deck.summon, { by: ['a', 'b'], only: true });
+});
+
+test('summon 会序列化并能再导入', () => {
+    const deck = makeDeck({ summon: { by: ['parent-deck'], only: true } });
+    const wire = serializePack(deck);
+    assert.deepEqual(wire.summon, { by: ['parent-deck'], only: true });
+    const again = validatePack(wire);
+    assert.equal(again.ok, true);
+    assert.deepEqual(again.pack.summon, { by: ['parent-deck'], only: true });
+});
+
+test('旧包没有 summon 时补默认值', () => {
+    const deck = makeDeck();
+    delete deck.summon;
+    const wire = serializePack(deck);
+    assert.deepEqual(wire.summon, { by: [], only: false });
+});
+
+// ---------------------------------------------------------------------------
+
 section('持续时长');
 test('hold 默认是永久，旧数据会被补齐', () => {
     const deck = makeDeck();
