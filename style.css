@@ -22,7 +22,7 @@
     height: calc(100dvh - var(--topBarBlockSize, 50px) - 12px) !important;
     max-height: calc(100dvh - var(--topBarBlockSize, 50px) - 12px) !important;
     margin: 0 !important;
-    border-radius: 0 0 2px 2px;
+    border-radius: 0 0 8px 8px;
     z-index: 3050;
     display: flex;
     flex-direction: column;
@@ -53,16 +53,16 @@
 }
 
 #state-engine-panel .se-title {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     white-space: nowrap;
 }
 
 #state-engine-panel .se-sub {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     letter-spacing: 0.08em;
-    opacity: 0.55;
+    opacity: 0.65;
     margin-left: 8px;
 }
 
@@ -77,9 +77,10 @@
 #state-engine-panel .se-settings .menu_button {
     white-space: nowrap;
     flex: 0 0 auto;
-    padding: 4px 10px;
-    border-radius: 2px;
-    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    min-height: 30px;
 }
 
 #state-engine-panel .se-switch {
@@ -127,9 +128,10 @@
 }
 
 #state-engine-panel .se-air-label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.12em;
+    opacity: 0.85;
 }
 
 #state-engine-panel .se-air-count {
@@ -147,7 +149,8 @@
 }
 
 #state-engine-panel .se-air-path {
-    font-size: 14px;
+    font-size: 13px;
+    opacity: 0.88;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -185,7 +188,7 @@
     padding: 2px 0 0 16px;
     color: inherit;
     font-size: 12px;
-    opacity: 0.6;
+    opacity: 0.75;
     cursor: pointer;
     text-decoration: underline;
     text-decoration-style: dotted;
@@ -243,18 +246,16 @@
 }
 
 #state-engine-panel .se-deck-item:hover {
-    background: var(--white20a, rgba(255, 255, 255, 0.05));
-    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--SmartThemeEmColor, #888) 70%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 4%, transparent);
 }
 
 #state-engine-panel .se-deck-item.active {
-    background: var(--white20a, rgba(255, 255, 255, 0.07));
-    box-shadow: inset 2px 0 0 var(--SmartThemeBodyColor, #ddd);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 9%, transparent);
 }
 
 #state-engine-panel .se-deck-item-name {
     font-weight: 600;
-    font-size: 14px;
+    font-size: 15px;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -263,15 +264,15 @@
 
 #state-engine-panel .se-deck-count {
     font-weight: 400;
-    font-size: 11px;
-    opacity: 0.5;
+    font-size: 12px;
+    opacity: 0.6;
     margin-left: 4px;
 }
 
 #state-engine-panel .se-deck-item-meta,
 #state-engine-panel .se-deck-item-value {
-    font-size: 11px;
-    opacity: 0.5;
+    font-size: 12px;
+    opacity: 0.6;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -321,31 +322,35 @@
 #state-engine-panel .se-items {
     display: flex;
     flex-direction: column;
+    gap: 8px;
 }
 
 #state-engine-panel .se-item-row {
-    border-bottom: 1px dashed var(--SmartThemeBorderColor, #333);
+    border-radius: 6px;
 }
 
 #state-engine-panel .se-item-main {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 64px 56px 24px;
+    grid-template-columns: minmax(0, 1fr) 40px 48px 24px;
     align-items: center;
     gap: 10px;
-    min-height: 40px;
-    padding: 0 4px;
+    min-height: 44px;
+    padding: 0 8px;
     cursor: pointer;
-    border-left: 2px solid transparent;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 #state-engine-panel .se-item-main:hover {
-    background: var(--white20a, rgba(255, 255, 255, 0.055));
-    border-left-color: var(--SmartThemeEmColor, #888);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 5%, transparent);
+    border-color: var(--SmartThemeBorderColor, #444);
 }
 
 #state-engine-panel .se-item-row.open .se-item-main {
-    border-left-color: var(--SmartThemeBodyColor, #ddd);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 6%, transparent);
+    border-color: var(--SmartThemeBorderColor, #444);
+    box-shadow: inset 2px 0 0 var(--SmartThemeBodyColor, #ddd);
 }
 
 #state-engine-panel .se-item-name-view {
@@ -360,106 +365,107 @@
     display: inline-block;
     width: 12px;
     margin-right: 4px;
-    font-size: 10px;
-    opacity: 0.45;
+    font-size: 12px;
+    opacity: 0.55;
     transition: transform 0.12s ease, opacity 0.12s ease;
 }
 
 #state-engine-panel .se-item-row.open .se-item-name-view::before {
     transform: rotate(90deg);
-    opacity: 0.8;
+    opacity: 0.9;
 }
 
 #state-engine-panel .se-item-bar {
-    height: 3px;
-    background: var(--SmartThemeBorderColor, #333);
+    height: 2px;
+    background: color-mix(in srgb, var(--SmartThemeBorderColor, #333) 50%, transparent);
     align-self: center;
 }
 
 #state-engine-panel .se-item-bar i {
     display: block;
     height: 100%;
-    background: var(--SmartThemeEmColor, #888);
-}
-
-#state-engine-panel .se-item-weight {
-    width: 100%;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, var(--SmartThemeEmColor, #888) 70%, transparent);
 }
 
 #state-engine-panel .se-icon-btn {
     padding: 0;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     line-height: 1;
     border: 0;
+    border-radius: 4px;
     background: transparent;
     color: inherit;
-    opacity: 0.35;
+    font-size: 14px;
+    opacity: 0.55;
     cursor: pointer;
 }
 
 #state-engine-panel .se-item-row:hover .se-icon-btn {
-    opacity: 0.8;
+    opacity: 0.95;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 8%, transparent);
 }
 
 #state-engine-panel .se-item-edit {
     display: none;
-    padding: 4px 4px 10px;
-}
-
-#state-engine-panel .se-item-row.open {
-    background: var(--white20a, rgba(255, 255, 255, 0.03));
+    margin-top: -2px;
+    padding: 10px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 4%, transparent);
 }
 
 #state-engine-panel .se-item-row.open .se-item-edit {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
 }
 
 #state-engine-panel .se-item-name,
 #state-engine-panel .se-item-text {
     width: 100%;
     min-width: 0;
-    background: transparent !important;
-    border-color: transparent !important;
-    border-radius: 2px;
-    padding: 2px 4px;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 15px;
 }
 
 #state-engine-panel .se-item-weight {
     width: 100%;
     min-width: 0;
-    border-radius: 2px;
-    padding: 2px 4px;
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #444) 70%, transparent) !important;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 13px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #444) 80%, transparent) !important;
     background: var(--black30a, rgba(0, 0, 0, 0.18)) !important;
     transition: border-color 0.12s ease, background 0.12s ease;
 }
 
 #state-engine-panel .se-item-main:hover .se-item-weight {
-    border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 55%, transparent) !important;
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 60%, transparent) !important;
 }
 
 #state-engine-panel .se-item-edit .se-item-name,
 #state-engine-panel .se-item-edit .se-item-text {
-    border-color: var(--SmartThemeBorderColor, #444) !important;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #444) 90%, transparent) !important;
     background: var(--black30a, rgba(0, 0, 0, 0.2)) !important;
 }
 
 #state-engine-panel .se-item-name:focus,
 #state-engine-panel .se-item-text:focus,
 #state-engine-panel .se-item-weight:focus {
-    border-color: var(--SmartThemeBorderColor, #777) !important;
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 70%, transparent) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 15%, transparent);
 }
 
 #state-engine-panel .se-item-text {
     resize: vertical;
     min-height: 72px;
     line-height: 1.6;
-    font-size: 14px;
+    font-size: 15px;
 }
 
 #state-engine-panel .se-items-empty {
@@ -478,12 +484,16 @@
 
 #state-engine-panel .se-items-foot .menu_button {
     white-space: nowrap;
-    border-radius: 2px;
+    border: 1px dashed var(--SmartThemeBorderColor, #444);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    opacity: 0.75;
 }
 
 #state-engine-panel .se-items-hint {
     font-size: 12px;
-    opacity: 0.4;
+    opacity: 0.55;
 }
 
 /* ------------------------------------------------------------------ */
@@ -570,10 +580,10 @@
 }
 
 #state-engine-panel .se-section-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    opacity: 0.6;
+    opacity: 0.7;
     margin: 12px 0 6px;
 }
 
@@ -688,7 +698,7 @@
 /* 条目行里的小标记：已出现 / 一次性 / 前置 N */
 #state-engine-panel .se-item-flag {
     margin-left: 8px;
-    font-size: 11px;
+    font-size: 12px;
     font-style: normal;
     color: var(--SmartThemeEmColor, #888);
     opacity: 0.9;
@@ -775,9 +785,9 @@
 }
 
 #state-engine-panel .se-deck-ops .menu_button {
-    border-radius: 2px;
-    font-size: 12px;
-    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    padding: 5px 12px;
     white-space: nowrap;
     flex: 0 0 auto;
 }
@@ -837,7 +847,7 @@
 
 #state-engine-panel .se-take-preview {
     font-size: 13px;
-    opacity: 0.6;
+    opacity: 0.72;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -854,30 +864,32 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     white-space: nowrap;
-    border-radius: 3px;
-    padding: 7px 20px;
-    font-size: 14px;
+    border-radius: 6px;
+    padding: 9px 24px;
+    min-height: 38px;
+    font-size: 15px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 48%, transparent);
-    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 20%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 70%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 30%, transparent);
     transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 #state-engine-panel .se-take-btn:hover {
-    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 30%, transparent);
-    border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 62%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 36%, transparent);
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 88%, transparent);
 }
 
 #state-engine-panel .se-take-btn kbd {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
-    opacity: 0.6;
+    opacity: 0.55;
     border: 1px solid var(--SmartThemeBorderColor, #555);
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 0 4px;
-    margin-left: 6px;
+    margin-left: 8px;
 }
 
 #state-engine-panel .se-ledger {

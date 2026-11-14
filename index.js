@@ -1652,7 +1652,7 @@ function renderRequireList(deck, item, store) {
     const chosen = options.filter((option) => selected.has(option.ref));
     const summary = chosen.length
         ? `前置：已选 ${chosen.length} 个（${chosen.slice(0, 2).map((option) => option.itemName).join('、')}${chosen.length > 2 ? '…' : ''}）`
-        : '前置：无（点这里选择必须先出现的条目）';
+        : '前置：无';
     const rows = options
         .slice(0, 600)
         .map((option) => `
@@ -1698,7 +1698,7 @@ function renderItems(deck, store) {
                 <textarea class="text_pole se-item-text" data-item-field="text" rows="3" placeholder="这一条要交给 AI 的内容">${escapeHtml(item.text || '')}</textarea>
                 <label class="se-check se-check-wide">
                     <input type="checkbox" data-item-field="once" ${item.once ? 'checked' : ''}>
-                    <span>只出现一次（抽中后不再进候选池；配合下面的前置条件可以串剧情线）</span>
+                    <span>只出现一次（抽中后不再进候选池）</span>
                 </label>
                 ${renderRequireList(deck, item, store)}
             </div>
@@ -1710,7 +1710,6 @@ function renderItems(deck, store) {
         </div>
         <div class="se-items-foot">
             <button type="button" class="menu_button" data-action="add-item" data-deck="${escapeHtml(deck.id)}">+ 添加条目</button>
-            <span class="se-items-hint">点一行展开改名和内容</span>
         </div>`;
 }
 
@@ -2407,7 +2406,7 @@ function bindPanelEvents() {
                     const names = checked.map((el) => el.closest('label')?.querySelector('span')?.textContent?.trim() || el.dataset.requireRef);
                     summary.textContent = names.length
                         ? `前置：已选 ${names.length} 个（${names.slice(0, 2).join('、')}${names.length > 2 ? '…' : ''}）`
-                        : '前置：无（点这里选择必须先出现的条目）';
+                        : '前置：无';
                 }
             }
         }
