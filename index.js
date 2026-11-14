@@ -475,6 +475,16 @@ const CARD_EXT_SCHEMA = 1;
 const CARD_PROMPT_COMMENT = '[状态引擎] 本卡需要安装插件';
 const CARD_PROMPT_KEYS = ['状态引擎', 'state engine'];
 const CARD_PLUGIN_URL = 'https://github.com/lizard682/sillytavern-state-engine';
+const FIRST_MES_GUARD_KEY = 'firstMesGuard';
+const FIRST_MES_WARNING_PREFIX = '⚠️ 这张卡需要「状态引擎」插件';
+const FIRST_MES_WARNING = `${FIRST_MES_WARNING_PREFIX}
+
+这张角色卡自带了由插件抽取的清单（衣服、动作、场景、道具等）。
+你的酒馆里还没有安装这个插件，所以这些内容不会出现，只能玩到基础剧情。
+
+插件地址：${CARD_PLUGIN_URL}
+
+装好插件后重新打开这张卡：这条提醒会自动消失，开局会换回作者写的那一条。`;
 
 /** 当前角色对象（带 avatar / data）。 */
 function currentCharacterCard() {
@@ -491,11 +501,20 @@ function cardDecksOf(character) {
     return raw.decks.filter((deck) => deck && typeof deck === 'object' && deck.id);
 }
 
+/** 导出时改写第一句开场留下的备份（有就说明这张卡的开局被我们换成了安装提醒）。 */
+function firstMesGuardOf(character) {
+    const guard = character?.data?.extensions?.[CARD_EXT_KEY]?.[FIRST_MES_GUARD_KEY];
+    return guard && typeof guard.original === 'string' ? guard : null;
+}
+
+function isFirstMesWarning(text) {
+    return typeof text === 'string' && text.trimStart().startsWith(FIRST_MES_WARNING_PREFIX);
+}
+
 /**
  * 把种子合集沿三种关系扩成闭包：
  * 上级（parent）、下级（谁把 parent 指向我）、被谁唤起（summon.by 里的来源）。
- */
-function collectRelatedDecks(decks, seedIds) {
+ */function collectRelatedDecks(decks, seedIds) {
     const byId = new Map(decks.map((deck) => [deck.id, deck]));
     const seen = new Set();
     const queue = [...seedIds].filter((id) => byId.has(id));
@@ -589,19 +608,31 @@ async function exportDecksToCard() {
     const chosen = collectRelatedDecks(store.decks, seeds.length > 0 ? seeds : store.decks.map((deck) => deck.id));
     const list = chosen.map((deck) => deck.name || deck.id).join('、');
     const ok = window.confirm(
-        `把 ${chosen.length} 个合集写进「${character.name || '这张卡'}」？\n\n${list}\n\n写进去之后，你在酒馆里导出这张角色卡时，数据会跟着卡一起走。`,
+        `把 ${chosen.length} 个合集写进「${character.name || '这张卡'}」？\n\n${list}\n\n写进去之后，你在酒馆里导出这张角色卡时，数据会跟着卡一起走。\n同时会把这张卡的开局第一条换成「需要安装插件」的提醒，原来的开局挪到第二开局；装了插件的人打开时会自动换回来。`,
     );
     if (!ok) {
         return;
     }
     const decks = JSON.parse(JSON.stringify(chosen));
+    // 第一次导出记下原文；以后再导出时沿用原文，避免把提醒本身当成开局又备份一次。
+    const guard = firstMesGuardOf(character);
+    const originalFirstMes = String(guard?.original ?? character.data?.first_mes ?? '');
+    const existingGreetings = Array.isArray(character.data?.alternate_greetings)
+        ? character.data.alternate_greetings.filter((text) => typeof text === 'string' && text !== originalFirstMes)
+        : [];
     const data = {
+        first_mes: FIRST_MES_WARNING,
+        alternate_greetings: [originalFirstMes, ...existingGreetings],
         extensions: {
             [CARD_EXT_KEY]: {
                 schema: CARD_EXT_SCHEMA,
                 savedAt: new Date().toISOString(),
                 count: decks.length,
                 decks,
+                [FIRST_MES_GUARD_KEY]: {
+                    original: originalFirstMes,
+                    addedAt: new Date().toISOString(),
+                },
             },
         },
     };
@@ -615,11 +646,16 @@ async function exportDecksToCard() {
         // 先清掉旧的一份，避免上一次导出的合集残留在数组里。
         await saveCharacterMerge({
             avatar: character.avatar,
-            data: { extensions: { [CARD_EXT_KEY]: '__@@UNSET@@__' } },
+            data: {
+                extensions: { [CARD_EXT_KEY]: '__@@UNSET@@__' },
+                alternate_greetings: '__@@UNSET@@__',
+            },
         });
         await saveCharacterMerge({ avatar: character.avatar, data });
         // 本地对象同步一份，免得面板上还显示旧提示。
         character.data = character.data || {};
+        character.data.first_mes = data.first_mes;
+        character.data.alternate_greetings = data.alternate_greetings;
         character.data.extensions = { ...(character.data.extensions || {}), ...data.extensions };
         if (data.character_book) {
             character.data.character_book = data.character_book;
@@ -681,6 +717,106 @@ function importCardDecks() {
     cardHintDismissed = '';
     toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
     return { added, replaced };
+}
+
+/**
+ * 把被改成「安装提醒」的开局换回原文：
+ * first_mes 复原、把原开局从第二开局的数组里摘掉、删掉备份标记。
+ */
+async function restoreFirstMesFor(character) {
+    const guard = firstMesGuardOf(character);
+    if (!guard || !character?.avatar) {
+        return false;
+    }
+    const greetings = (Array.isArray(character.data?.alternate_greetings) ? character.data.alternate_greetings : [])
+        .filter((text) => typeof text === 'string' && text !== guard.original);
+    await saveCharacterMerge({
+        avatar: character.avatar,
+        data: { first_mes: guard.original, alternate_greetings: '__@@UNSET@@__' },
+    });
+    await saveCharacterMerge({
+        avatar: character.avatar,
+        data: { alternate_greetings: greetings },
+    });
+    await saveCharacterMerge({
+        avatar: character.avatar,
+        data: { extensions: { [CARD_EXT_KEY]: { [FIRST_MES_GUARD_KEY]: '__@@UNSET@@__' } } },
+    });
+    character.data.first_mes = guard.original;
+    character.data.alternate_greetings = greetings;
+    const ext = character.data.extensions?.[CARD_EXT_KEY];
+    if (ext && typeof ext === 'object') {
+        delete ext[FIRST_MES_GUARD_KEY];
+    }
+    return true;
+}
+
+/** 如果当前聊天第一条还是安装提醒，把它换成原开局。 */
+async function fixChatFirstMessage(character, original) {
+    const ctx = liveContext();
+    const first = ctx?.chat?.[0];
+    if (!first || !isFirstMesWarning(first.mes)) {
+        return false;
+    }
+    first.mes = original;
+    try {
+        await ctx.saveChat?.();
+    } catch (error) {
+        console.warn('[state-engine] 保存聊天失败', error);
+    }
+    return true;
+}
+
+/**
+ * 聊天里还留着安装提醒时，用当前角色卡的开局换掉它。
+ * 插件装了、但玩家是在装插件之前建的聊天，就会走到这里。
+ */
+async function fixWarningChatMessage() {
+    const ctx = liveContext();
+    const first = ctx?.chat?.[0];
+    if (!first || !isFirstMesWarning(first.mes)) {
+        return false;
+    }
+    const original = currentCharacterCard()?.data?.first_mes;
+    if (typeof original !== 'string' || !original.trim() || isFirstMesWarning(original)) {
+        return false;
+    }
+    first.mes = original;
+    try {
+        await ctx.saveChat?.();
+    } catch (error) {
+        console.warn('[state-engine] 保存聊天失败', error);
+    }
+    return true;
+}
+
+/** 扫描所有角色卡，把带安装提醒的卡恢复成正常开局（最多一次处理 5 张）。 */
+async function restoreFirstMesAll() {
+    const ctx = liveContext();
+    const characters = ctx?.characters;
+    if (!Array.isArray(characters) || characters.length === 0) {
+        return;
+    }
+    const currentAvatar = currentCharacterCard()?.avatar;
+    const pending = characters
+        .map((character) => ({ character, guard: firstMesGuardOf(character) }))
+        .filter((item) => item.guard);
+    for (const { character, guard } of pending.slice(0, 5)) {
+        try {
+            await restoreFirstMesFor(character);
+            if (currentAvatar && character.avatar === currentAvatar) {
+                const fixed = await fixChatFirstMessage(character, guard.original);
+                if (fixed) {
+                    toast('info', `「${character.name || '角色卡'}」的安装提醒已换回原开局`);
+                }
+            }
+        } catch (error) {
+            console.warn('[state-engine] 恢复开局失败', character?.name, error);
+        }
+    }
+    if (pending.length > 0) {
+        renderPanel();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2198,6 +2334,16 @@ function onChatChanged() {
                 console.warn('[state-engine] chat changed retry 2 failed', error);
             }
         }, 400);
+        setTimeout(() => {
+            restoreFirstMesFor(currentCharacterCard()).catch((error) => {
+                console.warn('[state-engine] 恢复开局失败', error);
+            });
+        }, 600);
+        setTimeout(() => {
+            fixWarningChatMessage().catch((error) => {
+                console.warn('[state-engine] 修复聊天开头失败', error);
+            });
+        }, 1200);
     } catch (error) {
         console.warn('[state-engine] chat changed failed', error);
     }
@@ -2233,6 +2379,12 @@ export async function init() {
         eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
         renderPanel();
         refreshInjections();
+        // 装了插件的人打开带提醒的卡时，把开局换回作者写的那一条。
+        setTimeout(() => {
+            restoreFirstMesAll()
+                .then(() => fixWarningChatMessage())
+                .catch((error) => console.warn('[state-engine] 恢复开局失败', error));
+        }, 4000);
         console.log('[state-engine] ready');
     } catch (error) {
         console.error('[state-engine] init failed', error);
