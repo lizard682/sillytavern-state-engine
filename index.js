@@ -1674,10 +1674,8 @@ function renderRequireList(deck, item, store) {
 function renderItems(deck, store) {
     const items = deck.items || [];
     const done = doneSet(store.state);
-    const maxWeight = Math.max(1, ...items.map((item) => Math.max(0, Number(item.weight) || 0)));
     const rows = items.map((item) => {
         const weight = Math.max(0, Number(item.weight) || 0);
-        const pct = Math.max(2, Math.min(100, Math.round((weight / maxWeight) * 100)));
         const used = item.once && done.has(itemRef(deck.id, item.id));
         const needCount = Array.isArray(item.requires) ? item.requires.length : 0;
         const flags = [
@@ -1689,7 +1687,6 @@ function renderItems(deck, store) {
         <div class="se-item-row" data-item="${escapeHtml(item.id)}">
             <div class="se-item-main" data-action="toggle-item">
                 <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
-                <span class="se-item-bar"><i style="width:${pct}%"></i></span>
                 <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="1" value="${weight}" title="相对权重：1 是基准，0 表示永不出现">
                 <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
             </div>
@@ -1770,8 +1767,7 @@ function renderEditor(store) {
         </div>
 
         <details class="se-deck-settings">
-            <summary>合集设置：名称、绑定、抽取规则、触发方式、注入位置</summary>
-        <div class="se-settings-grid">
+            <summary>合集设置：名称、绑定、抽取规则、触发方式、注入位置</summary>        <div class="se-settings-grid">
         <div class="se-settings-col">
         <div class="se-form">
             <label class="se-field se-field-name">
@@ -1968,7 +1964,7 @@ function buildPanel() {
     return `
         <div id="${PANEL_ID}" class="drawer-content closedDrawer">
             <div class="se-head">
-                <div class="se-title">状态引擎 <span class="se-sub">本轮上场</span></div>
+                <div class="se-title">状态引擎</div>
                 <div class="se-head-actions">
                     <label class="se-switch"><input type="checkbox" id="se-enabled"><span>启用</span></label>
                     <button type="button" class="menu_button" data-action="new-deck">新建合集</button>
