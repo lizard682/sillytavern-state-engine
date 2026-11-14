@@ -978,3 +978,27 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+/* 角色卡自带合集的提示条 */
+#state-engine-panel .se-card-hint {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--SmartThemeQuoteColor, #8a7a4a);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #8a7a4a) 12%, transparent);
+    font-size: 0.9em;
+    line-height: 1.45;
+}
+
+#state-engine-panel .se-card-hint[hidden] {
+    display: none !important;
+}
+
+#state-engine-panel .se-card-hint-text {
+    flex: 1 1 240px;
+    min-width: 0;
+}

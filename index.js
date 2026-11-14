@@ -65,6 +65,8 @@ let context;
 let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4 };
 let selectedDeckId = null;
 let airExpanded = false;
+// 用户手动关掉「卡里带了合集」提示条后，记住是哪张卡、多少个，避免一直弹。
+let cardHintDismissed = '';
 
 // ---------------------------------------------------------------------------
 // 基础工具
@@ -462,6 +464,223 @@ export function detectMvuNames(ctx = liveContext()) {
 /** 当前对话里的角色名（没注册 MVU 也能用）。 */
 function currentCharacterName(ctx = liveContext()) {
     return ctx?.name2 || ctx?.characters?.[ctx.characterId]?.name || '';
+}
+
+// ---------------------------------------------------------------------------
+// 角色卡携带：把合集写进卡里，换人开店也能带走
+// ---------------------------------------------------------------------------
+
+const CARD_EXT_KEY = 'stateEngine';
+const CARD_EXT_SCHEMA = 1;
+const CARD_PROMPT_COMMENT = '[状态引擎] 本卡需要安装插件';
+const CARD_PROMPT_KEYS = ['状态引擎', 'state engine'];
+const CARD_PLUGIN_URL = 'https://github.com/lizard682/sillytavern-state-engine';
+
+/** 当前角色对象（带 avatar / data）。 */
+function currentCharacterCard() {
+    const ctx = liveContext();
+    return ctx?.characters?.[ctx.characterId] || null;
+}
+
+/** 角色卡里由本插件写入的合集（没写就是空数组）。 */
+function cardDecksOf(character) {
+    const raw = character?.data?.extensions?.[CARD_EXT_KEY];
+    if (!raw || !Array.isArray(raw.decks)) {
+        return [];
+    }
+    return raw.decks.filter((deck) => deck && typeof deck === 'object' && deck.id);
+}
+
+/**
+ * 把种子合集沿三种关系扩成闭包：
+ * 上级（parent）、下级（谁把 parent 指向我）、被谁唤起（summon.by 里的来源）。
+ */
+function collectRelatedDecks(decks, seedIds) {
+    const byId = new Map(decks.map((deck) => [deck.id, deck]));
+    const seen = new Set();
+    const queue = [...seedIds].filter((id) => byId.has(id));
+    while (queue.length > 0) {
+        const id = queue.shift();
+        if (seen.has(id) || !byId.has(id)) {
+            continue;
+        }
+        seen.add(id);
+        const deck = byId.get(id);
+        if (deck.parent && byId.has(deck.parent) && !seen.has(deck.parent)) {
+            queue.push(deck.parent);
+        }
+        for (const other of decks) {
+            if (other.parent === id && !seen.has(other.id)) {
+                queue.push(other.id);
+            }
+        }
+        for (const sourceId of deck.summon?.by || []) {
+            if (byId.has(sourceId) && !seen.has(sourceId)) {
+                queue.push(sourceId);
+            }
+        }
+    }
+    return [...seen].map((id) => byId.get(id)).filter(Boolean);
+}
+
+/** 绑定到当前角色的合集 id（手动输入的别的名字不算）。 */
+function boundDeckIds(store, ctx) {
+    const name = currentCharacterName(ctx);
+    return store.decks
+        .filter((deck) => {
+            const binding = deck.binding || DEFAULT_BINDING;
+            if (!binding.name) {
+                return false;
+            }
+            return binding.type === 'character' || binding.name === name;
+        })
+        .map((deck) => deck.id);
+}
+
+/** 写进角色卡的一条世界书提示，让没装插件的人也能看到「这张卡需要插件」。 */
+function buildCardPromptEntry(character) {
+    const entries = character?.data?.character_book?.entries || [];
+    if (entries.some((entry) => entry?.comment === CARD_PROMPT_COMMENT)) {
+        return null;
+    }
+    return {
+        id: entries.length + 1,
+        keys: CARD_PROMPT_KEYS,
+        secondary_keys: [],
+        comment: CARD_PROMPT_COMMENT,
+        content: `这张角色卡自带了「状态引擎」的清单抽签数据。\n如果酒馆顶栏没有骰子图标，说明还没安装插件；装上之后，打开这张卡会提示你导入自带的合集。\n插件地址：${CARD_PLUGIN_URL}`,
+        constant: false,
+        selective: true,
+        insertion_order: 100,
+        enabled: true,
+        position: 'after_char',
+        extensions: {},
+    };
+}
+
+async function saveCharacterMerge(payload) {
+    const ctx = liveContext();
+    const headers = ctx?.getRequestHeaders?.() || { 'Content-Type': 'application/json' };
+    const response = await fetch('/api/characters/merge-attributes', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`保存角色卡失败（${response.status}）${detail.slice(0, 120)}`);
+    }
+}
+
+/** 把「绑定到当前角色的合集 + 和它们有关联的合集」写进角色卡。 */
+async function exportDecksToCard() {
+    const ctx = liveContext();
+    const character = currentCharacterCard();
+    const store = getStore();
+    if (!character?.avatar) {
+        toast('error', '先在右侧选一张角色卡');
+        return;
+    }
+    if (!store || store.decks.length === 0) {
+        toast('error', '当前聊天还没有合集');
+        return;
+    }
+    const seeds = boundDeckIds(store, ctx);
+    const chosen = collectRelatedDecks(store.decks, seeds.length > 0 ? seeds : store.decks.map((deck) => deck.id));
+    const list = chosen.map((deck) => deck.name || deck.id).join('、');
+    const ok = window.confirm(
+        `把 ${chosen.length} 个合集写进「${character.name || '这张卡'}」？\n\n${list}\n\n写进去之后，你在酒馆里导出这张角色卡时，数据会跟着卡一起走。`,
+    );
+    if (!ok) {
+        return;
+    }
+    const decks = JSON.parse(JSON.stringify(chosen));
+    const data = {
+        extensions: {
+            [CARD_EXT_KEY]: {
+                schema: CARD_EXT_SCHEMA,
+                savedAt: new Date().toISOString(),
+                count: decks.length,
+                decks,
+            },
+        },
+    };
+    const promptEntry = buildCardPromptEntry(character);
+    if (promptEntry) {
+        data.character_book = {
+            entries: [...(character.data.character_book?.entries || []), promptEntry],
+        };
+    }
+    try {
+        // 先清掉旧的一份，避免上一次导出的合集残留在数组里。
+        await saveCharacterMerge({
+            avatar: character.avatar,
+            data: { extensions: { [CARD_EXT_KEY]: '__@@UNSET@@__' } },
+        });
+        await saveCharacterMerge({ avatar: character.avatar, data });
+        // 本地对象同步一份，免得面板上还显示旧提示。
+        character.data = character.data || {};
+        character.data.extensions = { ...(character.data.extensions || {}), ...data.extensions };
+        if (data.character_book) {
+            character.data.character_book = data.character_book;
+        }
+        toast('success', `已把 ${decks.length} 个合集写进「${character.name || '这张卡'}」`);
+        renderPanel();
+    } catch (error) {
+        console.error('[state-engine] 写角色卡失败', error);
+        toast('error', error.message || '写角色卡失败');
+    }
+}
+
+/** 角色卡里有、当前聊天里还没有的合集。 */
+function pendingCardDecks() {
+    const character = currentCharacterCard();
+    const store = getStore();
+    if (!character || !store) {
+        return [];
+    }
+    const have = new Set(store.decks.map((deck) => deck.id));
+    return cardDecksOf(character).filter((deck) => !have.has(deck.id));
+}
+
+/** 把角色卡里的合集导进当前聊天。 */
+function importCardDecks() {
+    const character = currentCharacterCard();
+    const store = getStore({ create: true });
+    if (!character || !store) {
+        toast('error', '先打开一个聊天');
+        return;
+    }
+    const incoming = cardDecksOf(character);
+    if (incoming.length === 0) {
+        toast('info', '这张卡里没有自带合集');
+        return;
+    }
+    let added = 0;
+    let replaced = 0;
+    for (const raw of incoming) {
+        let deck;
+        try {
+            deck = normalizeDeckShape(JSON.parse(JSON.stringify(raw)));
+        } catch (error) {
+            console.warn('[state-engine] 卡内合集格式异常', raw?.id, error);
+            continue;
+        }
+        const index = store.decks.findIndex((item) => item.id === deck.id);
+        if (index >= 0) {
+            store.decks[index] = deck;
+            replaced += 1;
+        } else {
+            store.decks.push(deck);
+            added += 1;
+        }
+    }
+    saveStore({ immediate: true });
+    refreshInjections();
+    renderPanel();
+    cardHintDismissed = '';
+    toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
+    return { added, replaced };
 }
 
 // ---------------------------------------------------------------------------
@@ -1501,6 +1720,7 @@ function renderPanel() {
         return;
     }
     const store = getStore();
+    renderCardHint();
     const enabled = root.querySelector('#se-enabled');
     if (enabled) {
         enabled.checked = settings.enabled !== false;
@@ -1543,9 +1763,12 @@ function buildPanel() {
                     <button type="button" class="menu_button" data-action="new-deck">新建合集</button>
                     <button type="button" class="menu_button" data-action="import">导入</button>
                     <button type="button" class="menu_button" data-action="export-all">导出全部</button>
+                    <button type="button" class="menu_button" data-action="export-card" title="把绑定到这张卡的合集（以及和它们有关联的合集）写进角色卡，导出卡时一起带走">随卡导出</button>
                     <input type="file" id="se-file" accept=".json,application/json" multiple hidden>
                 </div>
             </div>
+
+            <div id="se-card-hint" class="se-card-hint" hidden></div>
 
             <div id="se-air" class="se-air"></div>
 
@@ -1678,6 +1901,28 @@ function renderAir(store, expanded = false) {
             preview.innerHTML = `待抽 · <b>${escapeHtml(deck.name || deck.id)}</b> · ${deck.items?.length || 0} 条可选 · 权重合计 ${totalWeight}`;
         }
     }
+}
+
+/** 面板里「这张卡自带了合集」的提示条。 */
+function renderCardHint() {
+    const hint = document.getElementById('se-card-hint');
+    if (!hint) {
+        return;
+    }
+    const pending = pendingCardDecks();
+    const character = currentCharacterCard();
+    const key = pending.length > 0 ? `${character?.avatar || ''}:${pending.length}` : '';
+    if (pending.length === 0 || key === cardHintDismissed) {
+        hint.hidden = true;
+        hint.innerHTML = '';
+        return;
+    }
+    const names = pending.map((deck) => deck.name || deck.id).join('、');
+    hint.hidden = false;
+    hint.innerHTML = `
+        <span class="se-card-hint-text">「${escapeHtml(character?.name || '这张卡')}」自带了 ${pending.length} 个合集：${escapeHtml(names)}</span>
+        <button type="button" class="menu_button" data-action="import-card-decks">导入</button>
+        <button type="button" class="menu_button" data-action="dismiss-card-hint">先不用</button>`;
 }
 
 function ensureTopBarEntry() {
@@ -1815,6 +2060,14 @@ function bindPanelEvents() {
             root.querySelector('#se-file')?.click();
         } else if (action === 'export-all') {
             exportDecks();
+        } else if (action === 'export-card') {
+            exportDecksToCard();
+        } else if (action === 'import-card-decks') {
+            importCardDecks();
+        } else if (action === 'dismiss-card-hint') {
+            const character = currentCharacterCard();
+            cardHintDismissed = `${character?.avatar || ''}:${pendingCardDecks().length}`;
+            renderCardHint();
         } else if (action === 'reset-ai-template') {
             settings.aiTemplate = DEFAULT_AI_TEMPLATE;
             saveSettings();
