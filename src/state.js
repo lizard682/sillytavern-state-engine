@@ -20,8 +20,42 @@ export function createState(seed, startTurn = 0) {
         seed: seed || freshSeed(),
         turn: Number.isFinite(Number(startTurn)) ? Number(startTurn) : 0,
         decks: {},
+        // 全局进度：记录「哪些条目已经出现过」（合集id::条目id），
+        // 供「只出现一次」和「前置条件」使用，跨合集共享。
+        progress: [],
         ledger: [],
     };
+}
+
+/** 前置条件引用的键。 */
+export function itemRef(deckId, itemId) {
+    return `${deckId}::${itemId}`;
+}
+
+/** 取已完成条目的集合（顺带把 progress 修成数组）。 */
+export function doneSet(state) {
+    if (!Array.isArray(state.progress)) {
+        state.progress = [];
+    }
+    return new Set(state.progress);
+}
+
+/** 抽中后把条目写进进度（去重）。 */
+export function recordProgress(state, deckId, items) {
+    if (!Array.isArray(state.progress)) {
+        state.progress = [];
+    }
+    for (const item of items || []) {
+        const ref = itemRef(deckId, item.id);
+        if (!state.progress.includes(ref)) {
+            state.progress.push(ref);
+        }
+    }
+}
+
+/** 清空进度：所有「只出现一次」和前置条件回到初始状态。 */
+export function clearProgress(state) {
+    state.progress = [];
 }
 
 /** 不能当对象键用：写进去会碰到 Object.prototype。 */
@@ -146,16 +180,37 @@ export function drawDeck(state, deck, options = {}) {
 
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
     const excluded = new Set(cooldown > 0 ? ds.recent.slice(-cooldown) : []);
-    // weight 为 0 的条目视为禁用，不进入候选池。
-    const pool = deck.items.filter((item) => !excluded.has(item.id) && (Number(item.weight) || 0) > 0);
+    const done = doneSet(state);
+    // 候选池：排除冷却中、权重为 0、已经「只出现一次」用过、以及前置条件没满足的条目。
+    const pool = deck.items.filter((item) => {
+        if (excluded.has(item.id)) {
+            return false;
+        }
+        if ((Number(item.weight) || 0) <= 0) {
+            return false;
+        }
+        if (item.once && done.has(itemRef(deck.id, item.id))) {
+            return false;
+        }
+        if (Array.isArray(item.requires) && item.requires.some((ref) => !done.has(ref))) {
+            return false;
+        }
+        return true;
+    });
 
     if (pool.length === 0) {
-        // 全部都在冷却里（或全被关掉）：这一轮不抽，宁可留空也不硬塞重复内容。
+        // 全部都在冷却里、都被关掉、或前置条件没满足：这一轮不抽，宁可留空也不硬塞重复内容。
         // 同时清掉旧值，否则旧条目会一直留在注入里，和「这一轮没有」自相矛盾。
         ds.current = [];
         ds.lastDecisionTurn = turn;
         ds.lastTurn = turn;
-        pushLedger(state, { deck: deck.id, deckName: deck.name, cause, picked: [], note: '候选都在冷却中或都被关闭' });
+        pushLedger(state, {
+            deck: deck.id,
+            deckName: deck.name,
+            cause,
+            picked: [],
+            note: '没有可抽的条目（冷却 / 只出现一次已用过 / 前置条件未满足）',
+        });
         return { changed: true, items: [], ids: [], cause: 'exhausted', fallback: true };
     }
 
@@ -170,6 +225,8 @@ export function drawDeck(state, deck, options = {}) {
     if (ds.recent.length > keep) {
         ds.recent = ds.recent.slice(-keep);
     }
+    // 记录进度：供「只出现一次」和别的条目的前置条件使用。
+    recordProgress(state, deck.id, picked);
     ds.lastTurn = turn;
     ds.lastDecisionTurn = turn;
     ds.holdStart = turn;

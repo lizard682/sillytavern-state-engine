@@ -26,19 +26,23 @@ import {
     DEFAULT_TRIGGER,
     SCAN_FIELDS,
     normalizeKeywords,
+    normalizeRequires,
     serializePack,
     validatePack,
 } from './src/pack.js';
 import {
     clearDeckHistory,
+    clearProgress,
     createState,
     currentItems,
     deckState,
+    doneSet,
     drawDeck,
     drawDeckTree,
     endHold,
     expireIfDue,
     hasCurrent,
+    itemRef,
     resetDeckState,
     syncTurn,
 } from './src/state.js';
@@ -170,6 +174,14 @@ function normalizeDeckShape(deck) {
             // JSON 里 Infinity 会被写成 null，读回来要当默认权重，不能让条目静默消失。
             const weight = Number(item.weight);
             item.weight = Number.isFinite(weight) ? Math.max(0, weight) : 1;
+            if (typeof item.once !== 'boolean') {
+                item.once = item.once === true;
+            }
+            if (!Array.isArray(item.requires)) {
+                item.requires = [];
+            } else {
+                item.requires = normalizeRequires(item.requires);
+            }
             delete item.situation;
         }
     });
@@ -1410,7 +1422,11 @@ function setItemField(deckId, itemId, field, value) {
     if (!store || !deck || !item) {
         return;
     }
-    item[field] = field === 'weight' ? Math.max(0, Number(value) || 0) : value;
+    item[field] = field === 'weight'
+        ? Math.max(0, Number(value) || 0)
+        : field === 'once'
+            ? value === true || value === 'true'
+            : value;
     saveStore();
     refreshInjections();
     // 改名字时当前值/侧栏里的显示要跟着变，但不整块重绘。
@@ -1608,16 +1624,71 @@ function renderSidebar(store) {
     }).join('');
 }
 
-function renderItems(deck) {
+/**
+ * 条目「前置条件」的多选清单。
+ * - 列出全部合集的全部条目，排除自己。
+ * - 已经出现过的条目打个「已出现」标记，方便作者顺着剧情线连。
+ * - 条目多时用搜索框过滤，不一次渲染几千行也能用。
+ */
+function renderRequireList(deck, item, store) {
+    const done = doneSet(store.state);
+    const selfRef = itemRef(deck.id, item.id);
+    const selected = new Set(Array.isArray(item.requires) ? item.requires : []);
+    const options = [];
+    for (const other of store.decks) {
+        for (const entry of other.items || []) {
+            const ref = itemRef(other.id, entry.id);
+            if (ref === selfRef) {
+                continue;
+            }
+            options.push({
+                ref,
+                deckName: other.name || other.id,
+                itemName: entry.name || entry.id,
+                done: done.has(ref),
+            });
+        }
+    }
+    const chosen = options.filter((option) => selected.has(option.ref));
+    const summary = chosen.length
+        ? `前置：已选 ${chosen.length} 个（${chosen.slice(0, 2).map((option) => option.itemName).join('、')}${chosen.length > 2 ? '…' : ''}）`
+        : '前置：无（点这里选择必须先出现的条目）';
+    const rows = options
+        .slice(0, 600)
+        .map((option) => `
+            <label class="se-require-row" data-search="${escapeHtml(`${option.deckName} ${option.itemName}`.toLowerCase())}">
+                <input type="checkbox" data-require-ref="${escapeHtml(option.ref)}" ${selected.has(option.ref) ? 'checked' : ''}>
+                <span>${escapeHtml(option.deckName)} › ${escapeHtml(option.itemName)}${option.done ? ' <em>已出现</em>' : ''}</span>
+            </label>`)
+        .join('');
+    return `
+        <details class="se-multi-select se-require-block">
+            <summary>${escapeHtml(summary)}</summary>
+            <div class="se-require-panel">
+                <input type="text" class="text_pole se-require-search" data-require-search placeholder="搜索条目名或合集名…">
+                <div class="se-require-list">${rows || '<div class="se-muted">没有可选的条目（这个聊天里只有这一条）。</div>'}</div>
+            </div>
+        </details>`;
+}
+
+function renderItems(deck, store) {
     const items = deck.items || [];
+    const done = doneSet(store.state);
     const maxWeight = Math.max(1, ...items.map((item) => Math.max(0, Number(item.weight) || 0)));
     const rows = items.map((item) => {
         const weight = Math.max(0, Number(item.weight) || 0);
         const pct = Math.max(2, Math.min(100, Math.round((weight / maxWeight) * 100)));
+        const used = item.once && done.has(itemRef(deck.id, item.id));
+        const needCount = Array.isArray(item.requires) ? item.requires.length : 0;
+        const flags = [
+            used ? '已出现' : '',
+            item.once ? '一次性' : '',
+            needCount ? `前置 ${needCount}` : '',
+        ].filter(Boolean).join(' · ');
         return `
         <div class="se-item-row" data-item="${escapeHtml(item.id)}">
             <div class="se-item-main" data-action="toggle-item">
-                <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}</span>
+                <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
                 <span class="se-item-bar"><i style="width:${pct}%"></i></span>
                 <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="1" value="${weight}" title="相对权重：1 是基准，0 表示永不出现">
                 <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
@@ -1625,6 +1696,11 @@ function renderItems(deck) {
             <div class="se-item-edit">
                 <input type="text" class="text_pole se-item-name" data-item-field="name" value="${escapeHtml(item.name || '')}" placeholder="条目名称">
                 <textarea class="text_pole se-item-text" data-item-field="text" rows="3" placeholder="这一条要交给 AI 的内容">${escapeHtml(item.text || '')}</textarea>
+                <label class="se-check se-check-wide">
+                    <input type="checkbox" data-item-field="once" ${item.once ? 'checked' : ''}>
+                    <span>只出现一次（抽中后不再进候选池；配合下面的前置条件可以串剧情线）</span>
+                </label>
+                ${renderRequireList(deck, item, store)}
             </div>
         </div>`;
     }).join('');
@@ -1691,7 +1767,7 @@ function renderEditor(store) {
     root.innerHTML = `
         <div class="se-items-block">
             <div class="se-items-title"><span class="se-items-deck">${escapeHtml(deck.name || deck.id)}</span><span class="se-items-count">${(deck.items || []).length} 条</span></div>
-            ${renderItems(deck)}
+            ${renderItems(deck, store)}
         </div>
 
         <details class="se-deck-settings">
@@ -2248,6 +2324,19 @@ function bindPanelEvents() {
         }
     });
 
+    // 前置条件清单的搜索框：按 data-search 就地过滤，不重绘。
+    root.addEventListener('input', (event) => {
+        const search = event.target.closest?.('[data-require-search]');
+        if (!search) {
+            return;
+        }
+        const panel = search.closest('.se-require-panel');
+        const query = String(search.value || '').trim().toLowerCase();
+        panel?.querySelectorAll('.se-require-row').forEach((row) => {
+            row.hidden = Boolean(query) && !(row.dataset.search || '').includes(query);
+        });
+    });
+
     root.addEventListener('change', (event) => {
         const target = event.target;
         const deckId = selectedDeckId;
@@ -2302,7 +2391,24 @@ function bindPanelEvents() {
         } else if (target.dataset.itemField) {
             const row = target.closest('.se-item-row');
             if (row?.dataset.item) {
-                setItemField(deckId, row.dataset.item, target.dataset.itemField, target.value);
+                // 勾选框传 checked；普通输入框传 value。
+                const value = target.type === 'checkbox' ? target.checked : target.value;
+                setItemField(deckId, row.dataset.item, target.dataset.itemField, value);
+            }
+        } else if (target.dataset.requireRef) {
+            const row = target.closest('.se-item-row');
+            if (row?.dataset.item) {
+                const checked = [...row.querySelectorAll('[data-require-ref]')].filter((el) => el.checked);
+                const refs = checked.map((el) => el.dataset.requireRef);
+                setItemField(deckId, row.dataset.item, 'requires', refs);
+                // 只更新这一行的摘要，不重绘整块（否则正在勾的列表会被收起来）。
+                const summary = row.querySelector('.se-require-block > summary');
+                if (summary) {
+                    const names = checked.map((el) => el.closest('label')?.querySelector('span')?.textContent?.trim() || el.dataset.requireRef);
+                    summary.textContent = names.length
+                        ? `前置：已选 ${names.length} 个（${names.slice(0, 2).join('、')}${names.length > 2 ? '…' : ''}）`
+                        : '前置：无（点这里选择必须先出现的条目）';
+                }
             }
         }
     });

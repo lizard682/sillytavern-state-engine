@@ -13,8 +13,11 @@
  */
 
 /** 当前格式版本。导入时接受 1 / 2 / 3 旧版并自动升级。 */
-export const PACK_SCHEMA = 4;
-const ACCEPTED_SCHEMA = [1, 2, 3, 4];
+export const PACK_SCHEMA = 5;
+const ACCEPTED_SCHEMA = [1, 2, 3, 4, 5];
+
+/** 前置条件引用：合集id::条目id */
+export const REF_RE = /^[a-zA-Z0-9_-]{1,64}::[a-zA-Z0-9_-]{1,64}$/;
 
 /**
  * 合集嵌套（schema 4）：
@@ -209,13 +212,35 @@ function normalizeNesting(raw) {
 }
 
 /**
+ * 前置条件：只收「合集id::条目id」格式的字符串，去重，非法项静默丢弃。
+ * 引用别的合集也允许（跨合集做剧情线），所以这里不校验目标是否存在。
+ */
+export function normalizeRequires(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    const out = [];
+    for (const value of raw) {
+        if (typeof value !== 'string') {
+            continue;
+        }
+        const ref = value.trim();
+        if (!REF_RE.test(ref) || out.includes(ref)) {
+            continue;
+        }
+        out.push(ref);
+    }
+    return out;
+}
+
+/**
  * 把一条清单项整理成固定形状。
  * 允许作者只写字符串（会被当成标题），也允许写完整对象。
  */
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1 };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [] };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -231,6 +256,10 @@ export function normalizeItem(raw, index = 0) {
         text: asString(raw.text) || name,
         // 出现概率：相对权重，默认 1；0 表示这一条永不出现（但保留在清单里）。
         weight: Number.isFinite(Number(raw.weight)) ? Math.max(0, Number(raw.weight)) : 1,
+        // 只出现一次：抽中后写进进度，之后不再进候选池。
+        once: raw.once === true,
+        // 前置条件：这些条目都「已经出现过」才轮得到它。
+        requires: normalizeRequires(raw.requires),
     };
 }
 
@@ -327,6 +356,8 @@ export function serializePack(pack) {
             name: item.name,
             text: item.text,
             weight: item.weight ?? 1,
+            ...(item.once ? { once: true } : {}),
+            ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
         })),
     };
 }

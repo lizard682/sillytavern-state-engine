@@ -58,7 +58,7 @@ test('schema 3 的合集可以通过并升级到当前版本', () => {
         items: [{ id: 'x', name: 'X', text: 'x' }],
     });
     assert.equal(result.ok, true);
-    assert.equal(result.pack.schema, 4);
+    assert.equal(result.pack.schema, 5);
     assert.equal(result.pack.items[0].weight, 1);
 });
 
@@ -74,7 +74,7 @@ test('旧 schema 2 会自动升级', () => {
         autoEvery: 5,
     });
     assert.equal(result.ok, true);
-    assert.equal(result.pack.schema, 4);
+    assert.equal(result.pack.schema, 5);
     assert.equal(result.pack.trigger.auto, true);
     assert.equal(result.pack.trigger.autoEvery, 5);
     assert.equal(result.pack.items[0].weight, 2);
@@ -124,7 +124,7 @@ test('序列化输出当前 schema 且保留绑定/注入设置', () => {
         keywords: ['换衣服'],
     });
     const out = serializePack(deck);
-    assert.equal(out.schema, 4);
+    assert.equal(out.schema, 5);
     assert.equal(out.binding.name, '沈微澜');
     assert.equal(out.inject.position, 'prompt');
     assert.equal(out.inject.role, 'user');
@@ -436,6 +436,77 @@ test('成环时不会死循环', () => {
     const b = makeDeck({ id: 'b', parent: 'a', items: [], cooldown: 0 });
     const tree = drawDeckTree(state, [a, b], 'a', { force: true });
     assert.equal(tree.ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// 一次性条目 + 前置条件（剧情线）
+
+section('一次性与前置条件');
+
+test('once 的条目抽中后不再进候选池', () => {
+    const state = createState('once-seed', 1);
+    state.turn = 1;
+    const deck = makeDeck({
+        id: 'line',
+        cooldown: 0,
+        items: [
+            { id: 'one', name: '第一幕', text: '1', once: true },
+            { id: 'two', name: '第二幕', text: '2' },
+        ],
+    });
+    const first = drawDeck(state, deck, { force: true });
+    assert.equal(first.ids.length, 1);
+    // 冷却为 0，但 once 用过之后不该再被抽到
+    for (let i = 0; i < 20; i += 1) {
+        const again = drawDeck(state, deck, { force: true, reroll: true });
+        assert.notEqual(again.ids[0], 'one');
+    }
+});
+
+test('前置条件未满足时不会抽到', () => {
+    const state = createState('req-seed', 1);
+    state.turn = 1;
+    const deck = makeDeck({
+        id: 'branch',
+        cooldown: 0,
+        items: [
+            { id: 'gate', name: '门', text: 'g' },
+            { id: 'after', name: '门后', text: 'a', requires: ['branch::gate'] },
+        ],
+    });
+    // 门还没出现：候选池里只有门，第一次一定抽到门
+    const first = drawDeck(state, deck, { force: true });
+    assert.equal(first.ids[0], 'gate');
+    // 门出现后，门后才解锁
+    let sawAfter = false;
+    for (let i = 0; i < 40; i += 1) {
+        deckState(state, 'branch').nonce += 1;
+        const again = drawDeck(state, deck, { force: true, reroll: true });
+        if (again.ids[0] === 'after') {
+            sawAfter = true;
+            break;
+        }
+    }
+    assert.equal(sawAfter, true);
+});
+
+test('前置条件可以跨合集，进度随抽中记录', () => {
+    const state = createState('req-cross', 1);
+    state.turn = 1;
+    const door = makeDeck({ id: 'door', cooldown: 0, items: [{ id: 'open', name: '开门', text: 'o' }] });
+    const inside = makeDeck({
+        id: 'inside',
+        cooldown: 0,
+        items: [{ id: 'room', name: '里屋', text: 'r', requires: ['door::open'] }],
+    });
+    const before = drawDeck(state, inside, { force: true });
+    assert.equal(before.ids.length, 0);
+
+    const opened = drawDeck(state, door, { force: true });
+    assert.equal(opened.ids[0], 'open');
+
+    const after = drawDeck(state, inside, { force: true });
+    assert.equal(after.items[0].id, 'room');
 });
 
 // ---------------------------------------------------------------------------

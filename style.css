@@ -646,6 +646,73 @@
     white-space: nowrap;
 }
 
+/* 条目行里的小标记：已出现 / 一次性 / 前置 N */
+#state-engine-panel .se-item-flag {
+    margin-left: 8px;
+    font-size: 11px;
+    font-style: normal;
+    color: var(--SmartThemeEmColor, #888);
+    opacity: 0.9;
+}
+
+/* 前置条件：编辑区里展开的多选清单 */
+#state-engine-panel .se-require-block {
+    margin-top: 6px;
+}
+
+#state-engine-panel .se-require-panel {
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-top: 0;
+    padding: 8px 10px;
+}
+
+#state-engine-panel .se-require-search {
+    width: 100%;
+    margin-bottom: 6px;
+}
+
+#state-engine-panel .se-require-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 220px;
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+#state-engine-panel .se-require-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    opacity: 0.85;
+    cursor: pointer;
+}
+
+#state-engine-panel .se-require-row[hidden] {
+    display: none !important;
+}
+
+#state-engine-panel .se-require-row span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#state-engine-panel .se-require-row em {
+    margin-left: 4px;
+    font-style: normal;
+    font-size: 11px;
+    color: var(--SmartThemeQuoteColor, #d9a94a);
+}
+
+#state-engine-panel .se-muted {
+    opacity: 0.6;
+    font-size: 13px;
+    padding: 4px 0;
+}
+
 #state-engine-panel .se-inject-form {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
