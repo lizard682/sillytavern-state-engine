@@ -658,13 +658,21 @@ async function exportDecksToCard() {
         // 先清掉旧的一份，避免上一次导出的合集残留在数组里。
         await saveCharacterMerge({
             avatar: character.avatar,
+            alternate_greetings: '__@@UNSET@@__',
             data: {
                 extensions: { [CARD_EXT_KEY]: '__@@UNSET@@__' },
                 alternate_greetings: '__@@UNSET@@__',
             },
         });
-        await saveCharacterMerge({ avatar: character.avatar, data });
+        await saveCharacterMerge({
+            avatar: character.avatar,
+            first_mes: data.first_mes,
+            alternate_greetings: data.alternate_greetings,
+            data,
+        });
         // 本地对象同步一份，免得面板上还显示旧提示。
+        character.first_mes = data.first_mes;
+        character.alternate_greetings = data.alternate_greetings;
         character.data = character.data || {};
         character.data.first_mes = data.first_mes;
         character.data.alternate_greetings = data.alternate_greetings;
@@ -744,16 +752,20 @@ async function restoreFirstMesFor(character) {
         .filter((text) => typeof text === 'string' && text !== guard.original);
     await saveCharacterMerge({
         avatar: character.avatar,
+        first_mes: guard.original,
         data: { first_mes: guard.original, alternate_greetings: '__@@UNSET@@__' },
     });
     await saveCharacterMerge({
         avatar: character.avatar,
+        alternate_greetings: greetings,
         data: { alternate_greetings: greetings },
     });
     await saveCharacterMerge({
         avatar: character.avatar,
         data: { extensions: { [CARD_EXT_KEY]: { [FIRST_MES_GUARD_KEY]: '__@@UNSET@@__' } } },
     });
+    character.first_mes = guard.original;
+    character.alternate_greetings = greetings;
     character.data.first_mes = guard.original;
     character.data.alternate_greetings = greetings;
     const ext = character.data.extensions?.[CARD_EXT_KEY];
