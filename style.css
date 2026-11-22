@@ -909,6 +909,29 @@
     opacity: 1;
 }
 
+#state-engine-panel .se-clear-btn {
+    flex: 0 0 auto;
+    margin-left: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    border-radius: 6px;
+    padding: 7px 14px;
+    min-height: 36px;
+    font-size: 13px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--SmartThemeEmColor, #999);
+    transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+#state-engine-panel .se-clear-btn:hover {
+    border-color: var(--SmartThemeBorderColor, #444);
+    color: var(--SmartThemeBodyColor, #ddd);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 6%, transparent);
+}
+
 #state-engine-panel .se-take-btn {
     margin-left: auto;
     flex: 0 0 auto;
