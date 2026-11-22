@@ -1762,6 +1762,44 @@ function deckDepth(decks, deck) {
     return depth;
 }
 
+/**
+ * 把合集按「树」排好序：每个母合集后面紧跟它自己的子合集。
+ * 直接按数组顺序渲染时，后挂上去的子合集会留在原来的位置，跑到别的母合集底下，
+ * 所以侧栏必须先按 parent 分组再走一遍。
+ */
+function orderedDecks(decks) {
+    const byParent = new Map();
+    for (const deck of decks) {
+        const key = deck.parent || '';
+        if (!byParent.has(key)) {
+            byParent.set(key, []);
+        }
+        byParent.get(key).push(deck);
+    }
+    const out = [];
+    const seen = new Set();
+    const walk = (parentId, depth) => {
+        for (const deck of byParent.get(parentId) || []) {
+            if (seen.has(deck.id)) {
+                continue;
+            }
+            seen.add(deck.id);
+            out.push({ deck, depth });
+            if (depth < 3) {
+                walk(deck.id, depth + 1);
+            }
+        }
+    };
+    walk('', 0);
+    // 挂成环或在更深层捡不到的，兜底按原顺序列出来，至少不会凭空消失。
+    for (const deck of decks) {
+        if (!seen.has(deck.id)) {
+            out.push({ deck, depth: 0 });
+        }
+    }
+    return out;
+}
+
 function renderSidebar(store) {
     const list = document.getElementById('se-deck-list');
     if (!list) {
@@ -1775,8 +1813,7 @@ function renderSidebar(store) {
     if (!selectedDeckId || !decks.some((deck) => deck.id === selectedDeckId)) {
         selectedDeckId = decks[0].id;
     }
-    list.innerHTML = decks.map((deck) => {
-        const depth = deckDepth(decks, deck);
+    list.innerHTML = orderedDecks(decks).map(({ deck, depth }) => {
         const childCount = decks.filter((item) => item.parent === deck.id).length;
         const empty = deckExhausted(store.state, decks, deck.id);
         const badge = deck.lock === true ? '<span class="se-deck-count se-deck-lock" title="不可打断：自动抽取只抽它">锁</span>'
