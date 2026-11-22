@@ -786,6 +786,27 @@ async function restoreFirstMesFor(character) {
     return true;
 }
 
+/**
+ * 角色编辑面板里的「开场白」输入框如果还显示着安装提醒，当场换成原文。
+ * 恢复是要写回角色卡的，写完不一定有人重绘面板，所以这里直接补一刀。
+ */
+function refreshCharacterEditorFirstMes(original) {
+    if (typeof original !== 'string' || !original.trim()) {
+        return;
+    }
+    const textarea = document.getElementById('firstmessage_textarea');
+    if (textarea && isFirstMesWarning(textarea.value)) {
+        textarea.value = original;
+    }
+    const wrapper = document.getElementById('firstMessageWrapper');
+    if (wrapper) {
+        const preview = wrapper.querySelector('.mes_text');
+        if (preview && isFirstMesWarning(preview.textContent || '')) {
+            preview.textContent = original;
+        }
+    }
+}
+
 /** 如果当前聊天第一条还是安装提醒，把它换成原开局。 */
 async function fixChatFirstMessage(character, original) {
     const ctx = liveContext();
@@ -2654,19 +2675,51 @@ function onChatChanged() {
                 console.warn('[state-engine] chat changed retry 2 failed', error);
             }
         }, 400);
+        // 装了插件的人打开带提醒的卡：立刻换回作者写的开场白，
+        // 不等轮询、也不等用户刷新页面。恢复是幂等的，guard 删掉之后就不会再跑。
+        restoreSelectedCharacterFirstMes();
+        setTimeout(restoreSelectedCharacterFirstMes, 500);
         setTimeout(() => {
-            restoreFirstMesFor(currentCharacterCard()).catch((error) => {
-                console.warn('[state-engine] 恢复开局失败', error);
-            });
-        }, 600);
-        setTimeout(() => {
-            fixWarningChatMessage().catch((error) => {
-                console.warn('[state-engine] 修复聊天开头失败', error);
-            });
-        }, 1200);
+            restoreSelectedCharacterFirstMes();
+            fixWarningChatMessage().catch(() => {});
+        }, 1600);
     } catch (error) {
         console.warn('[state-engine] chat changed failed', error);
     }
+}
+
+/** 当前选中的角色卡如果带着安装提醒，立刻恢复成原文并顺手刷新界面。 */
+function restoreSelectedCharacterFirstMes() {
+    try {
+        const character = currentCharacterCard();
+        const guard = firstMesGuardOf(character);
+        if (!guard) {
+            return;
+        }
+        restoreFirstMesFor(character)
+            .then((done) => {
+                if (!done) {
+                    return;
+                }
+                refreshCharacterEditorFirstMes(guard.original);
+                fixChatFirstMessage(character, guard.original).catch(() => {});
+            })
+            .catch((error) => console.warn('[state-engine] 恢复开局失败', error));
+    } catch (error) {
+        console.warn('[state-engine] 恢复开局失败', error);
+    }
+}
+
+/** 角色列表/角色面板加载后补一刀：把还带着安装提醒的卡换回原文。 */
+function onCharacterPageLoaded() {
+    setTimeout(restoreSelectedCharacterFirstMes, 250);
+    setTimeout(() => {
+        // 恢复可能已经把 guard 删了，这时用角色卡上已经换好的开场白再刷一次输入框。
+        const original = currentCharacterCard()?.data?.first_mes;
+        if (typeof original === 'string' && !isFirstMesWarning(original)) {
+            refreshCharacterEditorFirstMes(original);
+        }
+    }, 900);
 }
 
 function onGenerationStarted(type, _params, isDryRun) {
@@ -2697,6 +2750,8 @@ export async function init() {
         bindPanelEvents();
         eventSource.on(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
+        eventSource.on(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
+        eventSource.on(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         renderPanel();
         refreshInjections();
         // 装了插件的人打开带提醒的卡时，把开局换回作者写的那一条。
@@ -2717,6 +2772,8 @@ export async function clean() {
         const { eventSource, eventTypes } = ctx;
         eventSource?.removeListener?.(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource?.removeListener?.(eventTypes.GENERATION_STARTED, onGenerationStarted);
+        eventSource?.removeListener?.(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
+        eventSource?.removeListener?.(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         clearInjections(ctx, getDecks());
         document.getElementById(BUTTON_ID)?.remove();
         delete ctx?.extensionSettings?.[SETTINGS_KEY];
