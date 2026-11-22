@@ -1502,6 +1502,22 @@ function setItemField(deckId, itemId, field, value) {
     refreshInjections();
     // 改名字时当前值/侧栏里的显示要跟着变，但不整块重绘。
     syncEditor(deck);
+    // 名称输入框在展开的编辑区里，行首那行标题是另渲染的，得就地同步一下，
+    // 否则改完名字、折叠回去还是旧标题。
+    if (field === 'name') {
+        const row = [...document.querySelectorAll('#se-editor .se-item-row')]
+            .find((node) => node.dataset.item === itemId);
+        const view = row?.querySelector('.se-item-name-view');
+        if (view) {
+            const label = item.name || '未命名';
+            const first = view.firstChild;
+            if (first && first.nodeType === Node.TEXT_NODE) {
+                first.nodeValue = label;
+            } else {
+                view.insertAdjacentText('afterbegin', label);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
