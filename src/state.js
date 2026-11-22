@@ -195,6 +195,10 @@ export function drawDeck(state, deck, options = {}) {
         if (Array.isArray(item.requires) && item.requires.some((ref) => !done.has(ref))) {
             return false;
         }
+        // 排除条件：列表里任何一条已经出现过，这张条目就不再进池（互斥 / 分支的另一条路）。
+        if (Array.isArray(item.excludes) && item.excludes.some((ref) => done.has(ref))) {
+            return false;
+        }
         return true;
     });
 

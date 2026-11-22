@@ -733,6 +733,11 @@
     margin-top: 6px;
 }
 
+/* 排除条件：和前置并排但用强调色区分，避免看串 */
+#state-engine-panel .se-exclude-block > summary {
+    color: var(--SmartThemeQuoteColor, #d9a94a);
+}
+
 #state-engine-panel .se-require-panel {
     border: 1px solid var(--SmartThemeBorderColor, #444);
     border-top: 0;

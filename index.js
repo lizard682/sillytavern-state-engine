@@ -27,6 +27,7 @@ import {
     SCAN_FIELDS,
     normalizeKeywords,
     normalizeRequires,
+    normalizeExcludes,
     serializePack,
     validatePack,
 } from './src/pack.js';
@@ -181,6 +182,11 @@ function normalizeDeckShape(deck) {
                 item.requires = [];
             } else {
                 item.requires = normalizeRequires(item.requires);
+            }
+            if (!Array.isArray(item.excludes)) {
+                item.excludes = [];
+            } else {
+                item.excludes = normalizeExcludes(item.excludes);
             }
             delete item.situation;
         }
@@ -1438,7 +1444,11 @@ function setItemField(deckId, itemId, field, value) {
         ? Math.max(0, Number(value) || 0)
         : field === 'once'
             ? value === true || value === 'true'
-            : value;
+            : field === 'requires'
+                ? normalizeRequires(value)
+                : field === 'excludes'
+                    ? normalizeExcludes(value)
+                    : value;
     saveStore();
     refreshInjections();
     // 改名字时当前值/侧栏里的显示要跟着变，但不整块重绘。
@@ -1637,15 +1647,17 @@ function renderSidebar(store) {
 }
 
 /**
- * 条目「前置条件」的多选清单。
+ * 条目「前置条件 / 排除条件」的多选清单。
  * - 列出全部合集的全部条目，排除自己。
  * - 已经出现过的条目打个「已出现」标记，方便作者顺着剧情线连。
  * - 条目多时用搜索框过滤，不一次渲染几千行也能用。
+ * kind：'requires'（前置，全部出现过才轮得到）或 'excludes'（排除，出现任意一条就不进池）。
  */
-function renderRequireList(deck, item, store) {
+function renderRequireList(deck, item, store, kind = 'requires') {
+    const isExclude = kind === 'excludes';
     const done = doneSet(store.state);
     const selfRef = itemRef(deck.id, item.id);
-    const selected = new Set(Array.isArray(item.requires) ? item.requires : []);
+    const selected = new Set(Array.isArray(item[kind]) ? item[kind] : []);
     const options = [];
     for (const other of store.decks) {
         for (const entry of other.items || []) {
@@ -1662,19 +1674,20 @@ function renderRequireList(deck, item, store) {
         }
     }
     const chosen = options.filter((option) => selected.has(option.ref));
+    const label = isExclude ? '排除' : '前置';
     const summary = chosen.length
-        ? `前置：已选 ${chosen.length} 个（${chosen.slice(0, 2).map((option) => option.itemName).join('、')}${chosen.length > 2 ? '…' : ''}）`
-        : '前置：无';
+        ? `${label}：已选 ${chosen.length} 个（${chosen.slice(0, 2).map((option) => option.itemName).join('、')}${chosen.length > 2 ? '…' : ''}）`
+        : `${label}：无`;
     const rows = options
         .slice(0, 600)
         .map((option) => `
             <label class="se-require-row" data-search="${escapeHtml(`${option.deckName} ${option.itemName}`.toLowerCase())}">
-                <input type="checkbox" data-require-ref="${escapeHtml(option.ref)}" ${selected.has(option.ref) ? 'checked' : ''}>
+                <input type="checkbox" data-${isExclude ? 'exclude' : 'require'}-ref="${escapeHtml(option.ref)}" ${selected.has(option.ref) ? 'checked' : ''}>
                 <span>${escapeHtml(option.deckName)} › ${escapeHtml(option.itemName)}${option.done ? ' <em>已出现</em>' : ''}</span>
             </label>`)
         .join('');
     return `
-        <details class="se-multi-select se-require-block">
+        <details class="se-multi-select se-require-block${isExclude ? ' se-exclude-block' : ''}">
             <summary>${escapeHtml(summary)}</summary>
             <div class="se-require-panel">
                 <input type="text" class="text_pole se-require-search" data-require-search placeholder="搜索条目名或合集名…">
@@ -1690,10 +1703,12 @@ function renderItems(deck, store) {
         const weight = Math.max(0, Number(item.weight) || 0);
         const used = item.once && done.has(itemRef(deck.id, item.id));
         const needCount = Array.isArray(item.requires) ? item.requires.length : 0;
+        const avoidCount = Array.isArray(item.excludes) ? item.excludes.length : 0;
         const flags = [
             used ? '已出现' : '',
             item.once ? '一次性' : '',
             needCount ? `前置 ${needCount}` : '',
+            avoidCount ? `互斥 ${avoidCount}` : '',
         ].filter(Boolean).join(' · ');
         return `
         <div class="se-item-row" data-item="${escapeHtml(item.id)}">
@@ -1709,7 +1724,8 @@ function renderItems(deck, store) {
                     <input type="checkbox" data-item-field="once" ${item.once ? 'checked' : ''}>
                     <span>只出现一次（抽中后不再进候选池）</span>
                 </label>
-                ${renderRequireList(deck, item, store)}
+                ${renderRequireList(deck, item, store, 'requires')}
+                ${renderRequireList(deck, item, store, 'excludes')}
             </div>
         </div>`;
     }).join('');
@@ -2402,19 +2418,22 @@ function bindPanelEvents() {
                 const value = target.type === 'checkbox' ? target.checked : target.value;
                 setItemField(deckId, row.dataset.item, target.dataset.itemField, value);
             }
-        } else if (target.dataset.requireRef) {
+        } else if (target.dataset.requireRef || target.dataset.excludeRef) {
             const row = target.closest('.se-item-row');
             if (row?.dataset.item) {
-                const checked = [...row.querySelectorAll('[data-require-ref]')].filter((el) => el.checked);
-                const refs = checked.map((el) => el.dataset.requireRef);
-                setItemField(deckId, row.dataset.item, 'requires', refs);
+                const isExclude = Boolean(target.dataset.excludeRef);
+                const refKey = isExclude ? 'excludeRef' : 'requireRef';
+                const checked = [...row.querySelectorAll(`[data-${isExclude ? 'exclude' : 'require'}-ref]`)].filter((el) => el.checked);
+                const refs = checked.map((el) => el.dataset[refKey]);
+                setItemField(deckId, row.dataset.item, isExclude ? 'excludes' : 'requires', refs);
                 // 只更新这一行的摘要，不重绘整块（否则正在勾的列表会被收起来）。
-                const summary = row.querySelector('.se-require-block > summary');
+                const summary = row.querySelector(isExclude ? '.se-exclude-block > summary' : '.se-require-block:not(.se-exclude-block) > summary');
                 if (summary) {
-                    const names = checked.map((el) => el.closest('label')?.querySelector('span')?.textContent?.trim() || el.dataset.requireRef);
+                    const names = checked.map((el) => el.closest('label')?.querySelector('span')?.textContent?.trim() || el.dataset[refKey]);
+                    const label = isExclude ? '排除' : '前置';
                     summary.textContent = names.length
-                        ? `前置：已选 ${names.length} 个（${names.slice(0, 2).join('、')}${names.length > 2 ? '…' : ''}）`
-                        : '前置：无';
+                        ? `${label}：已选 ${names.length} 个（${names.slice(0, 2).join('、')}${names.length > 2 ? '…' : ''}）`
+                        : `${label}：无`;
                 }
             }
         }

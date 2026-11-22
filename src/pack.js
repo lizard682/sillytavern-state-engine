@@ -234,13 +234,22 @@ export function normalizeRequires(raw) {
 }
 
 /**
+ * 排除条件：也是「合集id::条目id」，但含义相反——
+ * 列表里任何一条已经出现过，这条就不进池（用来做互斥 / 分支的另一条路）。
+ * 格式规则和前置条件完全一致，直接复用。
+ */
+export function normalizeExcludes(raw) {
+    return normalizeRequires(raw);
+}
+
+/**
  * 把一条清单项整理成固定形状。
  * 允许作者只写字符串（会被当成标题），也允许写完整对象。
  */
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [] };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [] };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -260,6 +269,8 @@ export function normalizeItem(raw, index = 0) {
         once: raw.once === true,
         // 前置条件：这些条目都「已经出现过」才轮得到它。
         requires: normalizeRequires(raw.requires),
+        // 排除条件：这些条目里只要有一条出现过，这条就不进池。
+        excludes: normalizeExcludes(raw.excludes),
     };
 }
 
@@ -358,6 +369,7 @@ export function serializePack(pack) {
             weight: item.weight ?? 1,
             ...(item.once ? { once: true } : {}),
             ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
+            ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
         })),
     };
 }

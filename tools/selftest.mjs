@@ -509,6 +509,36 @@ test('前置条件可以跨合集，进度随抽中记录', () => {
     assert.equal(after.items[0].id, 'room');
 });
 
+test('排除条件：被排除的条目出现过之后，这条不再进池', () => {
+    const deck = makeDeck({
+        id: 'fork',
+        cooldown: 0,
+        items: [
+            { id: 'left', name: '走左边', text: 'l' },
+            { id: 'right', name: '走右边', text: 'r', excludes: ['fork::left'] },
+        ],
+    });
+    // 左边还没出现：右边仍然可抽（换几个种子总能抽到一次，避免单次随机运气）。
+    let sawRight = false;
+    for (let i = 0; i < 40 && !sawRight; i += 1) {
+        const fresh = createState(`exclude-probe-${i}`, 1);
+        const draw = drawDeck(fresh, deck, { force: true });
+        if (draw.ids[0] === 'right') {
+            sawRight = true;
+        }
+    }
+    assert.equal(sawRight, true);
+
+    // 把左边记进进度后，右边必须彻底消失。
+    const state = createState('exclude-seed', 1);
+    state.progress = ['fork::left'];
+    for (let i = 0; i < 40; i += 1) {
+        deckState(state, 'fork').nonce = i;
+        const draw = drawDeck(state, deck, { force: true });
+        assert.notEqual(draw.ids[0], 'right');
+    }
+});
+
 // ---------------------------------------------------------------------------
 
 console.log(`\n${passed} passed, ${failed} failed`);
