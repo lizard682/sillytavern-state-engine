@@ -21,6 +21,7 @@ import {
     DEFAULT_INJECT,
     DEFAULT_NESTING,
     DEFAULT_RECURSION,
+    PACK_SCHEMA,
     DEFAULT_SCAN,
     DEFAULT_SUMMON,
     DEFAULT_TRIGGER,
@@ -1459,8 +1460,8 @@ function setItemField(deckId, itemId, field, value) {
 // 导入导出
 // ---------------------------------------------------------------------------
 
-function downloadJson(payload, filename) {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+function downloadText(text, filename, mime = 'text/markdown') {
+    const blob = new Blob([text], { type: `${mime};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1470,6 +1471,119 @@ function downloadJson(payload, filename) {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/**
+ * 给「其他 AI」看的合集编写说明书：把格式、字段、写法建议和一份能直接导入的示例
+ * 打包成一篇 Markdown，用户丢给别的模型就能让它照着写合集。
+ */
+export function buildAiGuide() {
+    const example = [
+        {
+            schema: PACK_SCHEMA,
+            id: 'guide-outfit',
+            name: '示例衣柜',
+            binding: { type: 'none', name: '' },
+            trigger: { manual: true, auto: false, autoEvery: 3, keyword: false, ai: false },
+            keywords: ['换衣服', '出门'],
+            scan: { depth: 4, source: 'both', fields: [] },
+            inject: { position: 'chat', depth: 4, role: 'system' },
+            cooldown: 2,
+            pick: 1,
+            hold: { mode: 'forever', turns: 3 },
+            items: [
+                { id: 'coat', name: '旧风衣', text: '一件洗得发白的旧风衣，袖口磨出了毛边，口袋里总有一小截地铁票。', weight: 1 },
+                { id: 'dress', name: '墨绿连衣裙', text: '一条墨绿色连衣裙，裙摆到小腿，转身时会轻轻扫过桌角。', weight: 2 },
+                { id: 'once-coat', name: '第一次穿的风衣', text: '那件只在第一场雨里穿过一次的风衣，肩线还留着一道水痕。', weight: 1, once: true },
+            ],
+        },
+        {
+            schema: PACK_SCHEMA,
+            id: 'guide-story',
+            name: '示例剧情',
+            binding: { type: 'none', name: '' },
+            trigger: { manual: true, auto: false, autoEvery: 3, keyword: true, ai: false },
+            keywords: ['答应', '拒绝'],
+            scan: { depth: 6, source: 'both', fields: [] },
+            inject: { position: 'chat', depth: 2, role: 'system' },
+            cooldown: 0,
+            pick: 1,
+            hold: { mode: 'forever', turns: 3 },
+            items: [
+                { id: 'accept', name: '答应', text: '她点了点头，把杯子放回桌上，说好。', weight: 1, once: true },
+                { id: 'refuse', name: '拒绝', text: '她把杯子推开了一点，说这件事能不能先放一放。', weight: 1, once: true, excludes: ['guide-story::accept'] },
+                { id: 'after-accept', name: '答应之后', text: '第二天她来得比平时早，门口多了一双摆得很整齐的鞋。', weight: 1, requires: ['guide-story::accept'] },
+            ],
+        },
+    ];
+    const lines = [];
+    lines.push('# 状态引擎 · 合集编写说明（给 AI 用）');
+    lines.push('');
+    lines.push('你正在为一个酒馆（SillyTavern）插件「状态引擎」编写**合集**。');
+    lines.push('插件的工作方式：作者把内容拆成一份份清单（合集），每份清单里有很多条（条目）；游戏进行中，插件会按设定随机抽若干条，把抽中的文字发给模型。');
+    lines.push('所以你要产出的不是「提示词」，而是**可以被抽的内容**：每条都要能单独成立、直接读、不依赖上下文。');
+    lines.push('');
+    lines.push('## 输出格式');
+    lines.push('');
+    lines.push('- 输出一个 JSON **数组**，每个元素是一个合集；一次可以写多个合集。');
+    lines.push('- 只输出 JSON，不要写解释、不要用 Markdown 代码块包住（除非用户另外要求）。');
+    lines.push(`- 每个合集必须有 schema: ${PACK_SCHEMA}、name、items；其他字段可省略，省略时用默认值。`);
+    lines.push('- id 只能用英文字母、数字、下划线、短横线，最长 64 个字符；同一个合集内条目 id 不能重复。');
+    lines.push('- 用中文写 name、text；id 用简短英文（例如 coat、refuse、after-accept）。');
+    lines.push('');
+    lines.push('## 合集字段');
+    lines.push('');
+    lines.push('| 字段 | 类型 | 默认 | 说明 |');
+    lines.push('| --- | --- | --- | --- |');
+    lines.push('| schema | 数字 | 必填 | 当前版本 ' + PACK_SCHEMA + ' |');
+    lines.push('| name | 字符串 | 必填 | 合集名，例如「衣柜」「剧情」「场景」 |');
+    lines.push('| binding | 对象 | 不绑定 | { type: "none" | "character" | "chat" | "npc", name: "角色名" }；绑定后只在那个角色/聊天/NPC 在场时生效 |');
+    lines.push('| trigger | 对象 | 手动 | { manual, auto, autoEvery, keyword, ai }：面板按钮 / 每 N 楼自动 / 关键词 / AI 自己申请 |');
+    lines.push('| keywords | 字符串数组 | [] | 触发关键词；写在 /.../ 里表示正则 |');
+    lines.push('| scan | 对象 | 最近 4 条、用户+AI | { depth, source: "user" | "ai" | "both", fields: [] }；fields 可加 "description"、"personality"、"scenario"、"persona"、"notes"、"lorebook" |');
+    lines.push('| inject | 对象 | 聊天记录第 4 条前、System | { position: "chat" | "prompt" | "before", depth, role: "system" | "user" | "assistant" } |');
+    lines.push('| cooldown | 数字 | 2 | 抽中后至少隔几轮才会再被抽到 |');
+    lines.push('| pick | 数字 | 1 | 每次抽几条 |');
+    lines.push('| hold | 对象 | 永久 | { mode: "forever" | "turns" | "ai", turns: 3 }：抽中内容持续多久 |');
+    lines.push('| summon | 对象 | 无 | { by: ["其它合集id"], only: false }：被哪些合集抽中时顺带抽我 |');
+    lines.push('| nesting | 对象 | 顶层 | { parent: "上级合集id", onlyFromParent: false, entryWeight: 1 }：合集嵌套 |');
+    lines.push('| items | 数组 | 必填 | 条目列表 |');
+    lines.push('');
+    lines.push('## 条目字段');
+    lines.push('');
+    lines.push('| 字段 | 类型 | 默认 | 说明 |');
+    lines.push('| --- | --- | --- | --- |');
+    lines.push('| id | 字符串 | 必填 | 合集内唯一 |');
+    lines.push('| name | 字符串 | 必填 | 条目名，显示在面板上 |');
+    lines.push('| text | 字符串 | 必填 | 真正发给模型的内容 |');
+    lines.push('| weight | 数字 | 1 | 相对权重；0 表示永不出现 |');
+    lines.push('| once | 布尔 | false | 抽中一次后永不再进候选池 |');
+    lines.push('| requires | 字符串数组 | [] | 前置条件：这些条目**全部出现过**才可抽；格式 "合集id::条目id" |');
+    lines.push('| excludes | 字符串数组 | [] | 排除条件：这些条目**出现过任何一条**就永不出现；格式同上 |');
+    lines.push('');
+    lines.push('## 内容怎么写');
+    lines.push('');
+    lines.push('- 一条只写一件事：一套穿搭、一个动作、一个地点、一件道具。不要把三件事塞进一条。');
+    lines.push('- 20～120 字，具体、可观察：写材质、动作、声音、气味，不写情绪总结和评价。');
+    lines.push('- 不写成指令（不要「你应该…」「请描写…」），只给素材；模型会自己接。');
+    lines.push('- 同一份清单里的条目要能互相替换：风格统一、长度接近，抽到哪条都不突兀。');
+    lines.push('- 需要剧情推进时，用 once + requires/excludes 串线，不要靠关键词堆叠。');
+    lines.push('');
+    lines.push('## 一份可以直接导入的示例');
+    lines.push('');
+    lines.push('```json');
+    lines.push(JSON.stringify(example, null, 2));
+    lines.push('```');
+    lines.push('');
+    lines.push('把上面的 JSON 保存成 .json 文件，在插件面板点「导入」即可。');
+    return lines.join('\n');
+}
+
+function exportAiGuide() {
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadText(buildAiGuide(), `状态引擎-合集模板-${stamp}.md`);
+    toast('success', '已导出合集模板，可以直接丢给别的 AI');
+}
+
 
 function exportDecks() {
     const store = getStore();
@@ -2032,6 +2146,8 @@ function buildPanel() {
                     <input id="se-ai-depth" type="number" class="text_pole" min="0" step="1">
                 </label>
                 <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认模板</button>
+                <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
+                <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
                 <details class="se-ledger se-inject-preview-block">
                     <summary>本轮注入预览（真正发给 AI 的内容）</summary>
@@ -2309,6 +2425,8 @@ function bindPanelEvents() {
             refreshInjections();
             renderPanel();
             toast('success', 'AI 判定模板已恢复默认');
+        } else if (action === 'export-guide') {
+            exportAiGuide();
         } else if (action === 'toggle-air') {
             airExpanded = !airExpanded;
             renderAir(getStore(), airExpanded);

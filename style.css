@@ -1031,8 +1031,16 @@
     }
 
     #state-engine-panel .se-head-actions {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        overflow-x: auto;
         gap: 4px;
+        max-width: 100%;
+        padding-bottom: 2px;
+        scrollbar-width: thin;
+    }
+
+    #state-engine-panel .se-head-actions > * {
+        flex: 0 0 auto;
     }
 
     #state-engine-panel .se-head-actions .menu_button {
@@ -1136,6 +1144,68 @@
     #state-engine-panel .se-settings-grid,
     #state-engine-panel .se-form {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    /* 手机：把触摸目标放大到手指能稳稳点到的尺寸 */
+    #state-engine-panel .se-head-actions .menu_button {
+        min-height: 40px;
+        padding: 8px 14px;
+        font-size: 0.95em;
+    }
+
+    #state-engine-panel .se-deck-item {
+        min-height: 38px;
+        padding: 8px 10px;
+        font-size: 0.95em;
+    }
+
+    #state-engine-panel .se-item-main {
+        grid-template-columns: minmax(0, 1fr) 56px 34px;
+        min-height: 52px;
+        gap: 8px;
+    }
+
+    #state-engine-panel .se-item-weight {
+        min-height: 34px;
+        font-size: 0.95em;
+    }
+
+    #state-engine-panel .se-icon-btn {
+        width: 34px;
+        height: 34px;
+        font-size: 16px;
+    }
+
+    #state-engine-panel .se-item-name-view {
+        font-size: 0.95em;
+        line-height: 1.4;
+    }
+
+    #state-engine-panel .se-item-edit textarea {
+        min-height: 76px;
+    }
+
+    #state-engine-panel .se-form input:not([type='checkbox']):not([type='radio']),
+    #state-engine-panel .se-form select,
+    #state-engine-panel .se-form textarea {
+        min-height: 38px;
+    }
+
+    #state-engine-panel .se-take-btn {
+        flex: 1 1 100%;
+        min-height: 48px;
+        font-size: 1em;
+        justify-content: center;
+    }
+
+    #state-engine-panel .se-take-preview {
+        font-size: 0.85em;
+        line-height: 1.4;
+    }
+
+    #state-engine-panel .se-air {
+        max-height: 132px;
+        overflow-y: auto;
     }
 }
 
