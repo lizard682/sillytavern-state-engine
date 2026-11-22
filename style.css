@@ -291,6 +291,27 @@
     margin-left: 4px;
 }
 
+#state-engine-panel .se-deck-lock,
+#state-engine-panel .se-deck-empty {
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0 3px;
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+#state-engine-panel .se-deck-lock {
+    color: var(--SmartThemeQuoteColor, #d9a94a);
+}
+
+#state-engine-panel .se-deck-empty {
+    color: var(--SmartThemeEmColor, #919191);
+}
+
+#state-engine-panel .se-deck-done .se-deck-item-name {
+    opacity: 0.55;
+}
+
 #state-engine-panel .se-deck-item-meta,
 #state-engine-panel .se-deck-item-value {
     font-size: 12px;

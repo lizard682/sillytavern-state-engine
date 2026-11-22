@@ -179,28 +179,9 @@ export function drawDeck(state, deck, options = {}) {
     }
 
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
-    const excluded = new Set(cooldown > 0 ? ds.recent.slice(-cooldown) : []);
     const done = doneSet(state);
     // 候选池：排除冷却中、权重为 0、已经「只出现一次」用过、以及前置条件没满足的条目。
-    const pool = deck.items.filter((item) => {
-        if (excluded.has(item.id)) {
-            return false;
-        }
-        if ((Number(item.weight) || 0) <= 0) {
-            return false;
-        }
-        if (item.once && done.has(itemRef(deck.id, item.id))) {
-            return false;
-        }
-        if (Array.isArray(item.requires) && item.requires.some((ref) => !done.has(ref))) {
-            return false;
-        }
-        // 排除条件：列表里任何一条已经出现过，这张条目就不再进池（互斥 / 分支的另一条路）。
-        if (Array.isArray(item.excludes) && item.excludes.some((ref) => done.has(ref))) {
-            return false;
-        }
-        return true;
-    });
+    const pool = availableItems(state, deck);
 
     if (pool.length === 0) {
         // 全部都在冷却里、都被关掉、或前置条件没满足：这一轮不抽，宁可留空也不硬塞重复内容。
@@ -255,12 +236,88 @@ export function bumpNonce(state, deckId) {
 }
 
 /**
- * 合集树抽签：先抽「子合集」，再抽子合集的条目。
+ * 这个合集此刻能抽的条目。
+ * 排除：冷却中的、权重为 0 的、「只出现一次」已用过的、前置条件没满足的、排除条件被触发的。
+ */
+export function availableItems(state, deck) {
+    if (!deck || !Array.isArray(deck.items) || deck.items.length === 0) {
+        return [];
+    }
+    const ds = deckState(state, deck.id);
+    const cooldown = Math.max(0, Number(deck.cooldown) || 0);
+    const excluded = new Set(cooldown > 0 ? ds.recent.slice(-cooldown) : []);
+    const done = doneSet(state);
+    return deck.items.filter((item) => {
+        if (excluded.has(item.id)) {
+            return false;
+        }
+        if ((Number(item.weight) || 0) <= 0) {
+            return false;
+        }
+        if (item.once && done.has(itemRef(deck.id, item.id))) {
+            return false;
+        }
+        if (Array.isArray(item.requires) && item.requires.some((ref) => !done.has(ref))) {
+            return false;
+        }
+        // 排除条件：列表里任何一条已经出现过，这张条目就不再进池（互斥 / 分支的另一条路）。
+        if (Array.isArray(item.excludes) && item.excludes.some((ref) => done.has(ref))) {
+            return false;
+        }
+        return true;
+    });
+}
+
+/** 某个合集的直接子合集（启用的）。 */
+export function childDecks(decks, deckId) {
+    return (decks || []).filter((item) => item && item.parent === deckId && item.enabled !== false);
+}
+
+/**
+ * 这个合集是不是「抽无可抽」：
+ * 自己一条能抽的都没有，而且所有能参与的子合集也都抽无可抽。
+ * 权重为 0 的子合集不算「能参与」。
+ */
+export function deckExhausted(state, decks, deckId, seen = new Set()) {
+    if (!deckId || seen.has(deckId)) {
+        return false; // 成环时不要判成耗尽，交给上层防环
+    }
+    const deck = (decks || []).find((item) => item && item.id === deckId);
+    if (!deck) {
+        return true;
+    }
+    seen.add(deckId);
+    if (availableItems(state, deck).length > 0) {
+        return false;
+    }
+    const kids = childDecks(decks, deckId).filter((child) => (Number(child.entryWeight) || 0) > 0);
+    if (kids.length === 0) {
+        return true;
+    }
+    return kids.every((child) => deckExhausted(state, decks, child.id, seen));
+}
+
+/**
+ * 现在有没有「不可打断」的合集在管事。
+ * 有的话，自动抽取只认它；它自己抽无可抽了就自动让位。
+ */
+export function activeLockDeck(state, decks) {
+    const locked = (decks || []).filter((deck) => deck && deck.lock === true && deck.enabled !== false);
+    for (const deck of locked) {
+        if (!deckExhausted(state, decks, deck.id)) {
+            return deck;
+        }
+    }
+    return null;
+}
+
+/**
+ * 合集树抽签：条目和子合集放在同一把秤上比权重。
  *
- * - decks 里 parent === 当前合集 id 的，就是它的子合集。
- * - 子合集按下级自己的 entryWeight 加权抽一个，然后对子合集继续抽。
- * - 子合集抽中后，它自己的 current / hold / 注入照常生效；上层合集只负责「挑一组」。
- * - 最多 maxDepth 层，visited 防环（A 的 parent 是 B、B 的 parent 是 A 时不会死循环）。
+ * - 自己的可用条目算一份总权重；直接子合集各按 entryWeight 算一份。
+ * - 先掷一次骰子决定「这一抽走条目还是走某个子合集」，再按各自规则抽具体的东西。
+ * - 子合集抽无可抽（自己空、下面的也都空）就不参与竞争。
+ * - 最多 maxDepth 层，visited 防环。
  *
  * 返回：
  *   { ok, nested, deck, parentDeck, result } —— nested=true 表示这一抽是「抽中了子合集」，
@@ -281,41 +338,63 @@ export function drawDeckTree(state, decks, deckId, options = {}) {
     const nextVisited = new Set(visited);
     nextVisited.add(deckId);
 
-    const children = (decks || []).filter((item) => item && item.parent === deckId && item.enabled !== false);
-    if (children.length > 0 && depth < maxDepth) {
-        const rng = rngFor(state, deckId, 7);
-        const pool = children.map((child) => ({ ...child, weight: Number(child.entryWeight) || 0 }));
-        const picked = pickWithRng(pool, 1, rng)[0];
-        if (!picked) {
-            pushLedger(state, {
-                deck: deck.id,
-                deckName: deck.name,
-                cause,
-                picked: [],
-                note: '子合集的权重都是 0，没有可抽的',
-            });
-            return { ok: false, nested: false, deck, parentDeck: null, result: null, reason: 'empty' };
-        }
-        // 上层只记一笔「抽中了哪个子合集」，真正的条目账本由子合集自己写。
-        pushLedger(state, {
-            deck: deck.id,
-            deckName: deck.name,
-            cause: cause === 'manual' ? 'nested' : cause,
-            picked: [`→ ${picked.name}`],
-            note: '',
-        });
-        const childResult = drawDeckTree(state, decks, picked.id, {
-            force: true,
-            cause: cause === 'manual' ? 'nested' : cause,
-            maxDepth,
-            depth: depth + 1,
-            visited: nextVisited,
-        });
-        return { ok: true, nested: true, deck: picked, parentDeck: deck, result: childResult };
+    const items = availableItems(state, deck);
+    const itemWeight = items.reduce((sum, item) => sum + Math.max(0, Number(item.weight) || 0), 0);
+
+    const kids = depth < maxDepth
+        ? childDecks(decks, deckId).filter((child) => {
+            if (visited.has(child.id)) {
+                return false;
+            }
+            if ((Number(child.entryWeight) || 0) <= 0) {
+                return false;
+            }
+            return !deckExhausted(state, decks, child.id, new Set([deckId]));
+        })
+        : [];
+    const kidWeight = kids.reduce((sum, child) => sum + Math.max(0, Number(child.entryWeight) || 0), 0);
+    const total = itemWeight + kidWeight;
+
+    if (total <= 0) {
+        // 条目和子合集都没得抽：走一次 drawDeck 的空池分支，把旧值和账本收拾干净。
+        const result = drawDeck(state, deck, { force, cause });
+        return { ok: false, nested: false, deck, parentDeck: null, result, reason: 'exhausted' };
     }
 
-    const result = drawDeck(state, deck, { force, cause });
-    return { ok: true, nested: false, deck, parentDeck: null, result };
+    const rng = rngFor(state, deckId, 7);
+    const roll = rng.next() * total;
+
+    if (roll < itemWeight || kids.length === 0) {
+        const result = drawDeck(state, deck, { force, cause });
+        return { ok: true, nested: false, deck, parentDeck: null, result };
+    }
+
+    let acc = itemWeight;
+    let picked = kids[kids.length - 1];
+    for (const child of kids) {
+        acc += Math.max(0, Number(child.entryWeight) || 0);
+        if (roll < acc) {
+            picked = child;
+            break;
+        }
+    }
+
+    // 上层只记一笔「抽中了哪个子合集」，真正的条目账本由子合集自己写。
+    pushLedger(state, {
+        deck: deck.id,
+        deckName: deck.name,
+        cause: cause === 'manual' ? 'nested' : cause,
+        picked: [`→ ${picked.name}`],
+        note: '',
+    });
+    const childResult = drawDeckTree(state, decks, picked.id, {
+        force: true,
+        cause: cause === 'manual' ? 'nested' : cause,
+        maxDepth,
+        depth: depth + 1,
+        visited: nextVisited,
+    });
+    return { ok: true, nested: true, deck: picked, parentDeck: deck, result: childResult };
 }
 
 /**

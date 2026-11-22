@@ -338,6 +338,7 @@ export function validatePack(raw) {
             inject: normalizeInject(raw.inject),
             cooldown: asInt(raw.cooldown, 2, 0),
             pick: asInt(raw.pick, 1, 1),
+            lock: raw.lock === true,
             aiPrompt: asString(raw.aiPrompt),
             items,
         },
@@ -361,6 +362,7 @@ export function serializePack(pack) {
         inject: normalizeInject(pack.inject),
         cooldown: asInt(pack.cooldown, 2, 0),
         pick: asInt(pack.pick, 1, 1),
+        ...(pack.lock === true ? { lock: true } : {}),
         aiPrompt: asString(pack.aiPrompt),
         items: pack.items.map((item) => ({
             id: item.id,

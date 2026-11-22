@@ -41,6 +41,9 @@ import {
     doneSet,
     drawDeck,
     drawDeckTree,
+    activeLockDeck,
+    availableItems,
+    deckExhausted,
     endHold,
     expireIfDue,
     hasCurrent,
@@ -145,6 +148,7 @@ function normalizeDeckShape(deck) {
         deck.summon.by = Array.isArray(deck.summon.by) ? [...new Set(deck.summon.by.filter((id) => typeof id === 'string'))] : [];
         deck.summon.only = deck.summon.only === true;
     }
+    deck.lock = deck.lock === true;
     if (!deck.hold) {
         deck.hold = { ...DEFAULT_HOLD };
     } else {
@@ -1096,8 +1100,18 @@ function advanceOnGeneration() {
         }
     }
 
+    // 「不可打断」的合集在管事时，自动抽取（楼层/关键词/AI）只认它。
+    const lockDeck = activeLockDeck(store.state, store.decks);
+
     for (const deck of store.decks) {
         if (deck.enabled === false || !bindingActive(deck, ctx, pendingInput)) {
+            continue;
+        }
+        if (lockDeck && deck.id !== lockDeck.id) {
+            continue;
+        }
+        // 已经抽无可抽的合集，不再参与自动抽取。
+        if (deckExhausted(store.state, store.decks, deck.id)) {
             continue;
         }
         // 「只能被上级抽中」的子合集，正常对话的自动/关键词/AI 都不碰它。
@@ -1163,12 +1177,20 @@ function applySummons(store, ctx, seededIds) {
     const MAX_SUMMON_ROUNDS = 3;
     const visited = new Set(seededIds);
     const fired = [];
+    // 锁定中的合集管事时，别人不能被唤起。
+    const lockDeck = activeLockDeck(store.state, store.decks);
     let frontier = seededIds.slice();
     for (let round = 0; round < MAX_SUMMON_ROUNDS && frontier.length > 0; round += 1) {
         const nextFrontier = [];
         for (const sourceId of frontier) {
             for (const deck of store.decks) {
                 if (visited.has(deck.id) || deck.enabled === false || !bindingActive(deck, ctx)) {
+                    continue;
+                }
+                if (lockDeck && deck.id !== lockDeck.id) {
+                    continue;
+                }
+                if (deckExhausted(store.state, store.decks, deck.id)) {
                     continue;
                 }
                 // 只认上级合集的子合集，不参与「被唤起」。
@@ -1203,6 +1225,11 @@ function drawOne(deckId, { reroll = false } = {}) {
         return null;
     }
     const ds = deckState(store.state, deckId);
+    // 「不可打断」的合集开着时，手动抽别的会被自动抽取忽略，先说一句。
+    const lockDeck = activeLockDeck(store.state, store.decks);
+    if (lockDeck && lockDeck.id !== deckId) {
+        toast('info', `「${lockDeck.name || lockDeck.id}」开着不可打断，自动抽取只会抽它。`);
+    }
     // 每按一次「抽/重抽」都推进一期随机流：同楼层同一个 nonce 只会得到同一个结果。
     ds.nonce = (Number(ds.nonce) || 0) + 1;
     const tree = drawDeckTree(store.state, store.decks, deckId, {
@@ -1751,9 +1778,12 @@ function renderSidebar(store) {
     list.innerHTML = decks.map((deck) => {
         const depth = deckDepth(decks, deck);
         const childCount = decks.filter((item) => item.parent === deck.id).length;
+        const empty = deckExhausted(store.state, decks, deck.id);
+        const badge = deck.lock === true ? '<span class="se-deck-count se-deck-lock" title="不可打断：自动抽取只抽它">锁</span>'
+            : (empty ? '<span class="se-deck-count se-deck-empty" title="没有可抽的条目了">空</span>' : '');
         return `
-        <button type="button" class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
-            <span class="se-deck-item-name">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}</span>
+        <button type="button" class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
+            <span class="se-deck-item-name">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}${badge}</span>
             <span class="se-deck-item-meta">${escapeHtml(deck.binding?.name || triggerSummary(deck))}</span>
             <span class="se-deck-item-value">${escapeHtml(currentLabel(deck, store))}</span>
         </button>`;
@@ -1996,6 +2026,9 @@ function renderEditor(store) {
             </div>
         </details>
         <label class="se-checks se-check-wide"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
+
+        <div class="se-section-title">不可打断</div>
+        <label class="se-checks se-check-wide"><input type="checkbox" data-deck-field="lock" ${deck.lock ? 'checked' : ''}><span>开着时只抽它：同一层的其它合集暂时休眠，直到它抽无可抽</span></label>
 
         <div class="se-section-title">抽中的内容持续多久</div>
         <div class="se-form se-hold-form">

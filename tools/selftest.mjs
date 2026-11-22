@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 
 let passed = 0;
@@ -436,6 +436,98 @@ test('成环时不会死循环', () => {
     const b = makeDeck({ id: 'b', parent: 'a', items: [], cooldown: 0 });
     const tree = drawDeckTree(state, [a, b], 'a', { force: true });
     assert.equal(tree.ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// 条目与子合集在同一把秤上竞争
+
+section('条目与子合集竞争');
+
+test('父条目不会被有子合集这件事永久挡住', () => {
+    let itemHits = 0;
+    let childHits = 0;
+    for (let i = 0; i < 60; i += 1) {
+        const state = createState(`mix-${i}`, 1);
+        state.turn = 1;
+        const parent = makeDeck({ id: 'mix', name: '父', cooldown: 0, items: [{ id: 'own', name: '自己的条目', text: 'x', weight: 1 }] });
+        const child = makeDeck({ id: 'kid', name: '子', parent: 'mix', entryWeight: 9, cooldown: 0, items: [{ id: 'c1', name: '子条目', text: 'y' }] });
+        const tree = drawDeckTree(state, [parent, child], 'mix', { force: true });
+        if (tree.nested) {
+            childHits += 1;
+        } else {
+            itemHits += 1;
+        }
+    }
+    assert.ok(itemHits > 0, `父条目一次都没抽到（item=${itemHits}, child=${childHits}）`);
+    assert.ok(childHits > itemHits, `权重 9 的子合集没有占多数（item=${itemHits}, child=${childHits}）`);
+});
+
+test('多个子合集按各自入口权重分配', () => {
+    let a = 0;
+    let b = 0;
+    for (let i = 0; i < 60; i += 1) {
+        const state = createState(`multi-${i}`, 1);
+        state.turn = 1;
+        const parent = makeDeck({ id: 'p', items: [], cooldown: 0 });
+        const ka = makeDeck({ id: 'a', parent: 'p', entryWeight: 1, cooldown: 0 });
+        const kb = makeDeck({ id: 'b', parent: 'p', entryWeight: 3, cooldown: 0 });
+        drawDeckTree(state, [parent, ka, kb], 'p', { force: true });
+        if (deckState(state, 'a').current.length > 0) {
+            a += 1;
+        }
+        if (deckState(state, 'b').current.length > 0) {
+            b += 1;
+        }
+    }
+    assert.ok(a > 0 && b > 0, `两个子合集都要能抽到（a=${a}, b=${b}）`);
+    assert.ok(b > a, `权重高的应该更多（a=${a}, b=${b}）`);
+});
+
+test('子合集抽无可抽时不参与竞争', () => {
+    const state = createState('kid-empty', 1);
+    const parent = makeDeck({ id: 'p', items: [{ id: 'own', name: '自己的', text: 'x' }], cooldown: 0 });
+    const kid = makeDeck({ id: 'k', parent: 'p', entryWeight: 5, cooldown: 0, items: [{ id: 'used', name: '用过', text: 'y', once: true }] });
+    state.progress = ['k::used'];
+    for (let i = 1; i <= 10; i += 1) {
+        state.turn = i;
+        const tree = drawDeckTree(state, [parent, kid], 'p', { force: true });
+        assert.equal(tree.nested, false);
+    }
+});
+
+test('抽无可抽的合集会被判定为耗尽', () => {
+    const state = createState('exhausted-seed', 1);
+    const deck = makeDeck({ id: 'only', cooldown: 0, items: [{ id: 'a', name: 'A', text: 'x', once: true }] });
+    assert.equal(deckExhausted(state, [deck], 'only'), false);
+    state.progress = ['only::a'];
+    assert.equal(deckExhausted(state, [deck], 'only'), true);
+});
+
+// ---------------------------------------------------------------------------
+
+section('不可打断');
+
+test('锁定的合集会占住自动抽取', () => {
+    const state = createState('lock-seed', 1);
+    const lock = makeDeck({ id: 'lock', name: '主线', lock: true, cooldown: 0 });
+    const other = makeDeck({ id: 'other', name: '支线', cooldown: 0 });
+    const active = activeLockDeck(state, [lock, other]);
+    assert.equal(active?.id, 'lock');
+});
+
+test('锁定合集抽无可抽后自动让位', () => {
+    const state = createState('lock-done', 1);
+    const lock = makeDeck({ id: 'lock', name: '主线', lock: true, cooldown: 0, items: [{ id: 'a', name: 'A', text: 'x', once: true }] });
+    const other = makeDeck({ id: 'other', name: '支线', cooldown: 0 });
+    state.progress = ['lock::a'];
+    assert.equal(activeLockDeck(state, [lock, other]), null);
+});
+
+test('普通合集不会挡住别的合集', () => {
+    const state = createState('no-lock', 1);
+    const a = makeDeck({ id: 'a', cooldown: 0 });
+    const b = makeDeck({ id: 'b', cooldown: 0 });
+    assert.equal(activeLockDeck(state, [a, b]), null);
 });
 
 // ---------------------------------------------------------------------------
