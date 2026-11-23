@@ -16,25 +16,28 @@ export function promptKey(deckId) {
     return `stateEngine:deck:${deckId}`;
 }
 
-/** 只把条目的内容拼起来，不套任何模板。绑定角色时标题带上角色名。 */
-export function compileDeckText(deck, items) {
+/** 只把条目的内容拼起来，不套任何模板。绑定角色时标题带上角色名。
+ *  rendered 是「组合」之后的文本（按条目 id），没有就退回条目原文。 */
+export function compileDeckText(deck, items, rendered = {}) {
     if (!items || items.length === 0) {
         return '';
     }
     const binding = deck.binding || {};
     const owner = binding.type !== 'none' ? String(binding.name || '').trim() : '';
     const head = owner ? `【${owner}·${deck.name}】` : `【${deck.name}】`;
-    const body = items.map((item) => item.text).join('\n');
+    const body = items
+        .map((item) => String((rendered && rendered[item.id]) ?? item.text ?? ''))
+        .join('\n');
     return `${head}\n${body}`;
 }
 
 /** 把一个合集的当前值写进（或清出）上下文。 */
-export function injectDeck(ctx, deck, items) {
+export function injectDeck(ctx, deck, items, rendered = {}) {
     if (!ctx?.setExtensionPrompt) {
         return;
     }
     const key = promptKey(deck.id);
-    const text = compileDeckText(deck, items);
+    const text = compileDeckText(deck, items, rendered);
     if (!text) {
         ctx.setExtensionPrompt(key, '', PROMPT_POSITION.chat, 0, false, PROMPT_ROLE.system);
         return;

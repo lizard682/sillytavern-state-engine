@@ -152,6 +152,9 @@ function normalizeDeckShape(deck) {
         deck.summon.only = deck.summon.only === true;
     }
     deck.lock = deck.lock === true;
+    deck.compose = Array.isArray(deck.compose)
+        ? [...new Set(deck.compose.filter((id) => typeof id === 'string' && id))]
+        : [];
     if (!deck.hold) {
         deck.hold = { ...DEFAULT_HOLD };
     } else {
@@ -196,6 +199,7 @@ function normalizeDeckShape(deck) {
             } else {
                 item.excludes = normalizeExcludes(item.excludes);
             }
+            item.excludeSiblings = item.excludeSiblings === true;
             delete item.situation;
         }
     });
@@ -975,7 +979,7 @@ function refreshInjections() {
             ctx.setExtensionPrompt(promptKey(deck.id), '', PROMPT_POSITION.chat, 0, false, PROMPT_ROLE.system);
             continue;
         }
-        injectDeck(ctx, deck, currentItems(store.state, deck));
+        injectDeck(ctx, deck, currentItems(store.state, deck), deckState(store.state, deck.id).rendered || {});
     }
     // 已经删除的合集，把残留的注入键清掉。
     const alive = new Set(store.decks.map((deck) => promptKey(deck.id)));
@@ -1371,6 +1375,7 @@ function createDeck() {
         scan: { ...DEFAULT_SCAN },
         recursion: { ...DEFAULT_RECURSION },
         summon: { by: [], only: false },
+        compose: [],
         hold: { ...DEFAULT_HOLD },
         inject: { ...DEFAULT_INJECT },
         cooldown: 2,
@@ -1566,7 +1571,9 @@ function setItemField(deckId, itemId, field, value) {
         ? Math.max(0, Number(value) || 0)
         : field === 'once'
             ? value === true || value === 'true'
-            : field === 'requires'
+            : field === 'excludeSiblings'
+                ? value === true || value === 'true'
+                : field === 'requires'
                 ? normalizeRequires(value)
                 : field === 'excludes'
                     ? normalizeExcludes(value)
@@ -2015,6 +2022,10 @@ function renderItems(deck, store) {
                     <input type="checkbox" data-item-field="once" ${item.once ? 'checked' : ''}>
                     <span>只出现一次（抽中后不再进候选池）</span>
                 </label>
+                <label class="se-check se-check-wide">
+                    <input type="checkbox" data-item-field="excludeSiblings" ${item.excludeSiblings ? 'checked' : ''}>
+                    <span>排除本合集的其它条目（同合集里只要先出现过别的条目，这条就永久不进池）</span>
+                </label>
                 ${renderRequireList(deck, item, store, 'requires')}
                 ${renderRequireList(deck, item, store, 'excludes')}
             </div>
@@ -2044,6 +2055,8 @@ function renderEditor(store) {
     const scan = deck.scan || DEFAULT_SCAN;
     const summon = deck.summon || DEFAULT_SUMMON;
     const summonNames = (summon.by || []).map((id) => store.decks.find((item) => item.id === id)?.name || id);
+    const compose = Array.isArray(deck.compose) ? deck.compose : [];
+    const composeNames = compose.map((id) => store.decks.find((item) => item.id === id)?.name || id);
     const hold = deck.hold || DEFAULT_HOLD;
     const binding = deck.binding || DEFAULT_BINDING;
     // 有上级合集的，什么时候抽由上级决定，自己那套触发条件不生效。
@@ -2179,6 +2192,15 @@ function renderEditor(store) {
             </div>
         </details>
         <label class="se-checks se-check-wide"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
+
+        <div class="se-section-title">组合（配套抽取）</div>
+        <div class="se-hint">抽中这里的条目时，会从下面勾选的合集里顺带各抽一次，把结果填进条目文本的 {合集名} 占位符。例：条目写「{颜色}的连衣裙」，颜色抽到白色，注入就是「白色的连衣裙」。</div>
+        <details class="se-multi-select">
+            <summary id="se-compose-summary" title="${escapeHtml(composeNames.join('、'))}">${escapeHtml(composeNames.length ? `已选 ${composeNames.length} 个：${composeNames.join('、')}` : '还没有组合来源，点这里选择')}</summary>
+            <div class="se-summon-list">
+                ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-compose-by="${escapeHtml(item.id)}" ${(compose || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
+            </div>
+        </details>
 
         <div class="se-section-title">不可打断</div>
         <label class="se-checks se-check-wide"><input type="checkbox" data-deck-field="lock" ${deck.lock ? 'checked' : ''}><span>开着时只抽它：同一层的其它合集暂时休眠，直到它抽无可抽</span></label>
@@ -2786,6 +2808,20 @@ function bindPanelEvents() {
             }
         } else if ('summonOnly' in target.dataset) {
             setDeckField(deckId, 'summon.only', target.checked);
+        } else if (target.dataset.composeBy) {
+            const root = document.getElementById('se-editor');
+            const ids = [...(root?.querySelectorAll('[data-compose-by]') || [])]
+                .filter((el) => el.checked)
+                .map((el) => el.dataset.composeBy);
+            setDeckField(deckId, 'compose', ids);
+            const fresh = getStore();
+            const freshDeck = fresh?.decks.find((item) => item.id === deckId);
+            const names = (freshDeck?.compose || []).map((id) => fresh.decks.find((item) => item.id === id)?.name || id);
+            const summary = document.getElementById('se-compose-summary');
+            if (summary) {
+                summary.textContent = names.length ? `已选 ${names.length} 个：${names.join('、')}` : '还没有组合来源，点这里选择';
+                summary.title = names.join('、');
+            }
         } else if (target.dataset.scanField) {
             const root = document.getElementById('se-editor');
             const fields = [...(root?.querySelectorAll('[data-scan-field]') || [])]

@@ -4,8 +4,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted } from '../src/state.js';
+import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 
 let passed = 0;
@@ -632,6 +632,104 @@ test('排除条件：被排除的条目出现过之后，这条不再进池', ()
 });
 
 // ---------------------------------------------------------------------------
+
+// [排除本合集其它条目] 勾了 excludeSiblings 的条目，同合集里别的条目出现过就不再进池
+test('排除本合集的其它条目（不必逐条手写排除）', () => {
+    const deck = {
+        id: 'sib',
+        name: '同层互斥',
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1, once: false, requires: [], excludes: [], excludeSiblings: true },
+            { id: 'b', name: 'B', text: 'B', weight: 1, once: false, requires: [], excludes: [], excludeSiblings: true },
+            { id: 'c', name: 'C', text: 'C', weight: 1, once: false, requires: [], excludes: [], excludeSiblings: true },
+        ],
+        pick: 1,
+        cooldown: 0,
+    };
+    const state = createState('sib-seed', 1);
+    assert.deepEqual(availableItems(state, deck).map((item) => item.id), ['a', 'b', 'c']);
+
+    // A 出现过之后，B / C 永久退出，只剩 A 自己
+    state.progress = ['sib::a'];
+    assert.deepEqual(availableItems(state, deck).map((item) => item.id), ['a']);
+});
+
+// [兼容] 老清单没有 excludeSiblings 字段时，默认不启用
+test('excludeSiblings 默认关闭（旧清单不受影响）', () => {
+    const pack = validatePack({
+        schema: PACK_SCHEMA,
+        id: 'sib2',
+        name: '旧清单',
+        items: [{ id: 'x', name: 'X', text: 'X' }],
+    });
+    assert.equal(pack.ok, true);
+    assert.equal(pack.pack.items[0].excludeSiblings, false);
+});
+
+// [组合] 抽中条目后，从来源合集顺带抽一次，填进 {合集名} 占位符
+test('组合：条目里的占位符会被来源合集抽到的内容替换', () => {
+    const outfit = {
+        id: 'compose-outfit',
+        name: '连衣裙',
+        items: [{ id: 'dress', name: '连衣裙', text: '{颜色}的连衣裙', weight: 1 }],
+        pick: 1,
+        cooldown: 0,
+        compose: ['compose-color'],
+    };
+    const color = {
+        id: 'compose-color',
+        name: '颜色',
+        items: [{ id: 'white', name: '白色', text: '白色', weight: 1 }],
+        pick: 1,
+        cooldown: 0,
+    };
+    const decks = [outfit, color];
+    const state = createState('compose-seed', 1);
+    const result = drawDeck(state, outfit, { force: true });
+    const rendered = applyCompose(state, decks, outfit, result);
+    assert.equal(rendered.dress, '白色的连衣裙');
+    assert.equal(deckState(state, 'compose-outfit').rendered.dress, '白色的连衣裙');
+    // 来源合集自己的 current 不被配套抽取写入
+    assert.deepEqual(deckState(state, 'compose-color').current, []);
+});
+
+// [组合] 同一轮抽两件，每次都会重新抽来源，结果可以不同
+test('组合：同一轮多次抽取会各自配套，互不覆盖', () => {
+    const outfit = {
+        id: 'compose-2',
+        name: '穿搭',
+        items: [
+            { id: 'coat', name: '外套', text: '{颜色}的外套', weight: 1 },
+            { id: 'pants', name: '长裤', text: '{颜色}的长裤', weight: 1 },
+        ],
+        pick: 1,
+        cooldown: 0,
+        compose: ['compose-color-2'],
+    };
+    const color = {
+        id: 'compose-color-2',
+        name: '颜色',
+        items: [
+            { id: 'red', name: '红色', text: '红色', weight: 1 },
+            { id: 'blue', name: '蓝色', text: '蓝色', weight: 1 },
+        ],
+        pick: 1,
+        cooldown: 0,
+    };
+    const decks = [outfit, color];
+    const seen = new Set();
+    for (let i = 0; i < 12; i += 1) {
+        const state = createState('compose-multi-' + i, 1);
+        const result = drawDeck(state, outfit, { force: true });
+        applyCompose(state, decks, outfit, result);
+        const text = deckState(state, 'compose-2').rendered[result.ids[0]];
+        if (text) {
+            seen.add(text);
+        }
+    }
+    assert.ok(seen.has('红色的外套') || seen.has('蓝色的外套'));
+    assert.ok(seen.has('红色的长裤') || seen.has('蓝色的长裤'));
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

@@ -169,9 +169,22 @@ export function currentItems(state, deck) {
  * 返回 { changed, items, ids, cause, fallback }
  */
 export function drawDeck(state, deck, options = {}) {
-    const { force = false, cause = 'manual' } = options;
+    const { force = false, cause = 'manual', ephemeral = false } = options;
     const ds = deckState(state, deck.id);
     const turn = state.turn;
+
+    // 配套抽取：只借用这个合集的候选池和随机流，不写 current / 进度 / 账本。
+    if (ephemeral) {
+        const pool = availableItems(state, deck);
+        if (pool.length === 0) {
+            return { changed: false, items: [], ids: [], cause: 'compose-empty', fallback: true };
+        }
+        const pick = Math.min(Math.max(1, Number(deck.pick) || 1), pool.length);
+        ds.composeNonce = (Number(ds.composeNonce) || 0) + 1;
+        const rng = createRng(hashSeed(`${state.seed}:${deck.id}:compose:${turn}:${ds.composeNonce}`));
+        const picked = pickWithRng(pool, pick, rng);
+        return { changed: true, items: picked, ids: picked.map((item) => item.id), cause: 'compose', fallback: false };
+    }
 
     // 同一楼层只决定一次；重生成、swipe 都沿用上一轮结论。
     if (!force && Number(ds.lastDecisionTurn) === turn && hasCurrent(state, deck)) {
@@ -228,9 +241,46 @@ export function drawDeck(state, deck, options = {}) {
     return { changed: true, items: picked, ids, cause, fallback: false };
 }
 
+/**
+ * 组合：抽中本合集的条目后，按 deck.compose 里列出的来源各抽一次，
+ * 把结果填进条目文本里的 {合集名} / {合集id} 占位符，存进 ds.rendered。
+ * 只影响「这一轮注入的文本」，不改来源合集的 current 与进度。
+ */
+export function applyCompose(state, decks, deck, result) {
+    const ds = deckState(state, deck.id);
+    const sources = Array.isArray(deck.compose) ? deck.compose : [];
+    if (sources.length === 0 || !result || !Array.isArray(result.items) || result.items.length === 0) {
+        ds.rendered = {};
+        return {};
+    }
+    const values = {};
+    for (const id of sources) {
+        const source = (decks || []).find((item) => item && item.id === id);
+        if (!source) {
+            continue;
+        }
+        const drawn = drawDeck(state, source, { force: true, ephemeral: true, cause: 'compose' });
+        const text = (drawn.items || []).map((item) => item.text).join('、');
+        if (!text) {
+            continue;
+        }
+        values[source.name] = text;
+        values[source.id] = text;
+    }
+    const rendered = {};
+    for (const item of result.items) {
+        let text = item.text || '';
+        for (const [key, value] of Object.entries(values)) {
+            text = text.split(`{${key}}`).join(value);
+        }
+        rendered[item.id] = text;
+    }
+    ds.rendered = rendered;
+    return rendered;
+}
+
 /** 手动重抽：nonce+1，让随机流换一条。 */
-export function bumpNonce(state, deckId) {
-    const ds = deckState(state, deckId);
+export function bumpNonce(state, deckId) {    const ds = deckState(state, deckId);
     ds.nonce = (Number(ds.nonce) || 0) + 1;
     return ds.nonce;
 }
@@ -263,6 +313,14 @@ export function availableItems(state, deck) {
         // 排除条件：列表里任何一条已经出现过，这张条目就不再进池（互斥 / 分支的另一条路）。
         if (Array.isArray(item.excludes) && item.excludes.some((ref) => done.has(ref))) {
             return false;
+        }
+        // 「排除本合集的其它条目」：同合集里任何别的条目出现过，这张就不再进池，
+        // 省得每张都手写一长串排除条件。
+        if (item.excludeSiblings === true) {
+            const hasSibling = deck.items.some((other) => other !== item && other.id !== item.id && done.has(itemRef(deck.id, other.id)));
+            if (hasSibling) {
+                return false;
+            }
         }
         return true;
     });
@@ -366,6 +424,7 @@ export function drawDeckTree(state, decks, deckId, options = {}) {
 
     if (roll < itemWeight || kids.length === 0) {
         const result = drawDeck(state, deck, { force, cause });
+        applyCompose(state, decks, deck, result);
         return { ok: true, nested: false, deck, parentDeck: null, result };
     }
 

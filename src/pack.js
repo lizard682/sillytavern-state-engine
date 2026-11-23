@@ -200,6 +200,14 @@ function normalizeBinding(raw) {
     };
 }
 
+/** 组合来源：抽中本合集条目时，顺带从这些合集各抽一次，填进条目文本的 {合集名} 占位符。 */
+function normalizeCompose(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    return [...new Set(raw.map((id) => asString(id)).filter((id) => SUMMON_ID_RE.test(id) && !RESERVED_IDS.has(id)))];
+}
+
 function normalizeNesting(raw) {
     const n = isPlainObject(raw) ? raw : {};
     const parent = asString(n.parent);
@@ -249,7 +257,7 @@ export function normalizeExcludes(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [] };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [], excludeSiblings: false };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -271,6 +279,8 @@ export function normalizeItem(raw, index = 0) {
         requires: normalizeRequires(raw.requires),
         // 排除条件：这些条目里只要有一条出现过，这条就不进池。
         excludes: normalizeExcludes(raw.excludes),
+        // 排除本合集的其它条目：同合集里任何别的条目出现过，这条就不进池（省得手写一长串）。
+        excludeSiblings: raw.excludeSiblings === true,
     };
 }
 
@@ -334,6 +344,7 @@ export function validatePack(raw) {
             scan: normalizeScan(raw.scan),
             recursion: normalizeRecursion(raw.recursion),
             summon: normalizeSummon(raw.summon),
+            compose: normalizeCompose(raw.compose),
             hold: normalizeHold(raw.hold),
             inject: normalizeInject(raw.inject),
             cooldown: asInt(raw.cooldown, 2, 0),
@@ -358,6 +369,7 @@ export function serializePack(pack) {
         scan: normalizeScan(pack.scan),
         recursion: normalizeRecursion(pack.recursion),
         summon: normalizeSummon(pack.summon),
+        compose: normalizeCompose(pack.compose),
         hold: normalizeHold(pack.hold),
         inject: normalizeInject(pack.inject),
         cooldown: asInt(pack.cooldown, 2, 0),
@@ -372,6 +384,7 @@ export function serializePack(pack) {
             ...(item.once ? { once: true } : {}),
             ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
             ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
+            ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),
         })),
     };
 }
