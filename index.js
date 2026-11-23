@@ -2350,8 +2350,10 @@ function buildPanel() {
 
             <div class="se-takebar">
                 <span id="se-take-preview" class="se-take-preview"></span>
-                <button type="button" class="menu_button se-clear-btn" data-action="clear-current" title="只清空当前抽中的内容；条目的「已出现」记录和冷却都不重置">清除</button>
-                <button type="button" class="menu_button se-take-btn" data-action="draw">抽一条 <kbd>空格</kbd></button>
+                <div class="se-take-actions">
+                    <button type="button" class="menu_button se-clear-btn" data-action="clear-current" title="只清空当前抽中的内容；条目的「已出现」记录和冷却都不重置">清除</button>
+                    <button type="button" class="menu_button se-take-btn" data-action="draw">抽一条 <kbd>空格</kbd></button>
+                </div>
             </div>
 
             <details class="se-ledger">
