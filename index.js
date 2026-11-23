@@ -2302,7 +2302,9 @@ function buildPanel() {
                     <button type="button" class="menu_button" data-action="new-deck">新建合集</button>
                     <button type="button" class="menu_button" data-action="import">导入</button>
                     <button type="button" class="menu_button" data-action="export-all">导出全部</button>
-                    <button type="button" class="menu_button" data-action="export-card" title="把绑定到这张卡的合集（以及和它们有关联的合集）写进角色卡，导出卡时一起带走">随卡导出</button>
+                    <label class="se-switch" title="勾上后，你在酒馆里点「导出」的那一刻会把当前合集写进角色卡，不用再单独点按钮">
+                        <input type="checkbox" id="se-auto-card-sync"><span>随卡导出</span>
+                    </label>
                     <input type="file" id="se-file" accept=".json,application/json" multiple hidden>
                 </div>
             </div>
@@ -2337,10 +2339,7 @@ function buildPanel() {
                     <input id="se-ai-depth" type="number" class="text_pole" min="0" step="1">
                 </label>
                 <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认模板</button>
-                <label class="se-check se-check-wide">
-                    <input type="checkbox" id="se-auto-card-sync">
-                    <span>导出角色卡时自动带上合集（勾上后，你在酒馆里点「导出」的那一刻会先把合集写进卡，不用每次点「随卡导出」）</span>
-                </label>
+                <div class="se-hint">勾上顶栏的「随卡导出」后，导出角色卡时会自动带上绑定到这张卡的合集（以及和它们有关联的合集）；导出完成会把本地卡的开场白恢复原样。</div>
                 <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
