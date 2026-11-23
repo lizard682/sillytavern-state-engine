@@ -1212,6 +1212,57 @@ function parsePluginDay(text) {
     return match ? Number(match[1]) : null;
 }
 
+const DATE_LIKE_RE = /(\d{1,5})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+
+/** 从变量里找可读的日期文本（卡自带的「天元482年7月15日」这类），找不到返回空串。 */
+function currentDateText(ctx) {
+    const variables = ctx?.chatMetadata?.variables;
+    const walk = (node, depth) => {
+        if (!node || typeof node !== 'object' || depth > 4) {
+            return '';
+        }
+        for (const [key, value] of Object.entries(node)) {
+            if (typeof value === 'string' && (DATE_LIKE_RE.test(value) || /^第\s*\d+\s*天/.test(value))) {
+                if (/日期|时间|date|time|day/i.test(key) || DATE_LIKE_RE.test(value)) {
+                    return value.trim();
+                }
+            }
+            if (value && typeof value === 'object') {
+                const found = walk(value, depth + 1);
+                if (found) {
+                    return found;
+                }
+            }
+        }
+        return '';
+    };
+    return walk(variables, 0);
+}
+
+/**
+ * 给模型看的时间提示：告诉它现在是哪一天，以及跨天时按 MVU 规则更新哪个变量。
+ * 没有日期时返回空串（不注入）。
+ */
+function buildTimeHint(ctx) {
+    const dateText = currentDateText(ctx);
+    const root = ctx?.chatMetadata?.variables?.stat_data;
+    const time = root && typeof root === 'object' && root[MVU_TIME_KEY] && typeof root[MVU_TIME_KEY] === 'object'
+        ? root[MVU_TIME_KEY]
+        : null;
+    const fallback = time ? String(time.日期 || '') : '';
+    const text = dateText || fallback;
+    if (!text) {
+        return '';
+    }
+    const extra = time && (time.时间 || time.天气) ? `（${[time.时间, time.天气].filter(Boolean).join(' · ')}）` : '';
+    return [
+        `【时间】现在是 ${text}${extra}。`,
+        '如果这一轮剧情确实跨到了新的一天，请照这张卡本来的变量更新方式，把时间和日期一起改掉：',
+        `「${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气」。`,
+        '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
+    ].join('\n');
+}
+
 /**
  * 插件自带的时间：卡里没有 MVU 日期时，用它来推进「按天」的清单。
  * 写进 MVU 变量（stat_data.状态引擎时间），变量管理器里能看到。
@@ -1257,6 +1308,18 @@ function effectiveGameDay(store, ctx) {
     return day !== null ? day : 1;
 }
 
+function syncGameDay(store) {
+    // 抽签前先把「今天」算出来，抽中的条目才能记下起始日期（按天持续用得上）。
+    try {
+        const day = effectiveGameDay(store, liveContext());
+        if (Number.isFinite(Number(day))) {
+            store.state.gameDay = day;
+        }
+    } catch {
+        // 日期读不到就保持原值，按天的规则会自己跳过。
+    }
+}
+
 function refreshInjections() {
     const ctx = liveContext();
     const store = getStore();
@@ -1279,6 +1342,8 @@ function refreshInjections() {
     if (gameDay !== null) {
         store.state.gameDay = gameDay;
     }
+    // 时间提示：告诉模型现在是哪一天，跨天时按 MVU 规则更新「状态引擎时间」。
+    ctx.setExtensionPrompt('stateEngine:time', buildTimeHint(ctx), PROMPT_POSITION.chat, 4, false, PROMPT_ROLE.system);
     for (const deck of store.decks) {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
             ctx.setExtensionPrompt(promptKey(deck.id), '', PROMPT_POSITION.chat, 0, false, PROMPT_ROLE.system);
@@ -1487,6 +1552,7 @@ function advanceOnGeneration() {
     }
     const ctx = liveContext();
     syncTurn(store.state, ctx?.chat?.length ?? 0);
+    syncGameDay(store);
     const floor = store.state.turn;
 
     if (!settings.enabled) {
@@ -1654,6 +1720,7 @@ function drawOne(deckId, { reroll = false } = {}) {
         return null;
     }
     const ds = deckState(store.state, deckId);
+    syncGameDay(store);
     // 「不可打断」的合集开着时，手动抽别的会被自动抽取忽略，先说一句。
     const lockDeck = activeLockDeck(store.state, store.decks);
     if (lockDeck && lockDeck.id !== deckId) {
@@ -1897,6 +1964,7 @@ async function judgeNow() {
         return;
     }
     const ctx = liveContext();
+    syncGameDay(store);
     if (typeof ctx?.generateQuietPrompt !== 'function') {
         toast('error', '当前酒馆版本不支持静默生成。');
         return;
@@ -3659,6 +3727,7 @@ function processAiMarkers(store, ctx) {
         return 0;
     }
     syncTurn(store.state, ctx?.chat?.length ?? 0);
+    syncGameDay(store);
     const floor = Number(store.state.turn) || 0;
     const markers = markersInLastAiMessage();
     if (markers.length === 0) {

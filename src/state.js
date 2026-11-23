@@ -606,7 +606,15 @@ export function expireIfDue(state, deck) {
         const startDay = Number(ds.holdStartDay);
         const nowDay = Number(state.gameDay);
         const days = Math.max(1, Number(hold.days) || 1);
-        if (!Number.isFinite(startDay) || startDay < 0 || !Number.isFinite(nowDay)) {
+        if (!Number.isFinite(startDay) || startDay < 0) {
+            // 抽中那一刻还没拿到日期（比如日期来自 MVU、抽签在刷新之前），
+            // 就把「今天」记成起点，从下一轮开始正常算，不要永远不过期。
+            if (Number.isFinite(nowDay)) {
+                ds.holdStartDay = nowDay;
+            }
+            return false;
+        }
+        if (!Number.isFinite(nowDay)) {
             return false;
         }
         if (nowDay - startDay < days) {
