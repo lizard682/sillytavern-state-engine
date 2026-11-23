@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
 import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
+import { buildDirectorPrompt } from '../src/inject.js';
 
 let passed = 0;
 let failed = 0;
@@ -823,6 +824,37 @@ test('没有初始值的合集保持空', () => {
     const { applied } = applyInitial(state, deck);
     assert.deepEqual(applied, []);
     assert.deepEqual(deckState(state, 'init-c').current, []);
+});
+
+
+section('AI 判定提示');
+test('会告诉模型每份清单现在停在哪、后面还有哪些', () => {
+    const decks = [
+        { id: 'plot', name: '剧情线', enabled: true, trigger: { ai: true } },
+        { id: 'bro', name: '师兄线', parent: 'plot', enabled: true, trigger: { ai: false } },
+    ];
+    const items = {
+        plot: [{ id: 'p1', name: '第一章 代婚' }],
+        bro: [
+            { id: 'b1', name: '第一章 代婚' },
+            { id: 'b2', name: '第二章 洞房' },
+            { id: 'b3', name: '第三章 三日' },
+        ],
+    };
+    const text = buildDirectorPrompt(decks, '{{decks}}', items, {
+        currentByDeck: { bro: ['b1'] },
+        done: new Set(['bro::b1']),
+    });
+    assert.ok(text.includes('师兄线'), 'should list the sub deck');
+    assert.ok(text.includes('当前：第一章 代婚'), 'should show current item');
+    assert.ok(text.includes('第二章 洞房'), 'should show the next chapter');
+    assert.ok(text.includes('要推进它就申请抽「剧情线」'), 'should say which deck to draw');
+});
+
+test('没有开启 AI 判定的合集不会出现在提示里', () => {
+    const decks = [{ id: 'x', name: '安静', enabled: true, trigger: { ai: false } }];
+    const text = buildDirectorPrompt(decks, '{{decks}}', { x: [{ id: 'a', name: 'A' }] }, {});
+    assert.equal(text, '');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

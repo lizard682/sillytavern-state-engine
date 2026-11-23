@@ -75,7 +75,7 @@ export const DEFAULT_AI_TEMPLATE = [
     '决定申请时，在回复的最后单独一行输出标记，格式：<!--SE:合集id-->',
     '标记是写给系统看的，不会出现在正文里；只输出标记本身，不要解释，也不要重复清单内容。',
     '',
-    '可以申请的清单（括号里是这份清单里可用的选项）：',
+    '可以申请的清单（下面会写清每份清单现在停在哪、后面还有哪些）：',
     '{{decks}}',
 ].join('\n');
 
@@ -83,8 +83,12 @@ export const DEFAULT_AI_TEMPLATE = [
  * AI 判定触发用的「导演提示」。
  * 只列合集自己开了 trigger.ai 的；模板由用户编辑，{{decks}} 会被替换。
  * itemsByDeck 用来把每份清单的可选项一并告诉模型，否则它不知道库里有什么。
+ * contextInfo.currentByDeck / contextInfo.done 用来告诉模型「现在是哪一条、后面还有哪些」，
+ * 尤其是嵌套的剧情线：模型得知道下一章是什么，才判断得出该不该申请下一轮。
  */
-export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}) {
+export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, contextInfo = {}) {
+    const currentByDeck = contextInfo.currentByDeck || {};
+    const done = contextInfo.done instanceof Set ? contextInfo.done : new Set(contextInfo.done || []);
     const usable = decks.filter((deck) => deck.enabled !== false && deck.trigger?.ai === true);
     // 有些合集不是靠 AI 触发，而是靠 AI 决定「什么时候结束」。
     const endable = decks.filter((deck) => deck.enabled !== false
@@ -93,16 +97,62 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}) {
     if (usable.length === 0 && endable.length === 0) {
         return '';
     }
+
+    const nameOf = (deckId, itemId) => {
+        const items = Array.isArray(itemsByDeck[deckId]) ? itemsByDeck[deckId] : [];
+        return String(items.find((item) => item?.id === itemId)?.name || '').trim();
+    };
+    const currentNames = (deckId) => (Array.isArray(currentByDeck[deckId]) ? currentByDeck[deckId] : [])
+        .map((id) => nameOf(deckId, id))
+        .filter(Boolean);
+
     const lines = usable.map((deck) => {
         const extra = String(deck.aiPrompt || '').trim();
         const items = Array.isArray(itemsByDeck[deck.id]) ? itemsByDeck[deck.id] : [];
-        const names = items
-            .map((item) => String(item?.name || '').trim())
-            .filter(Boolean)
-            .slice(0, 24);
-        const more = items.length > names.length ? `…（共 ${items.length} 条）` : '';
-        const options = names.length ? `${names.join('、')}${more}` : '';
-        const tail = [options, extra ? `说明：${extra}` : ''].filter(Boolean).join('；');
+        const cur = currentNames(deck.id);
+        // 还没轮到过的条目（按清单顺序），让模型知道剧情往哪走。
+        const pendingAll = items
+            .filter((item) => item?.id && !done.has(`${deck.id}::${item.id}`))
+            .map((item) => String(item.name || '').trim())
+            .filter(Boolean);
+        const pending = pendingAll.slice(0, 12);
+        const parts = [];
+        if (cur.length) {
+            parts.push(`当前：${cur.join('、')}`);
+        }
+        if (pending.length) {
+            const more = pendingAll.length > pending.length ? '…' : '';
+            parts.push(`还没轮到：${pending.join('、')}${more}`);
+        }
+        if (!cur.length && !pending.length && items.length === 0) {
+            parts.push('（这份清单还没有条目）');
+        }
+        // 挂在它下面的支线：把每条支线当前停在哪、后面还有哪几幕告诉模型。
+        const children = decks.filter((item) => item.parent === deck.id && item.enabled !== false);
+        if (children.length > 0) {
+            const childLines = children.map((child) => {
+                const childCur = currentNames(child.id);
+                const childItems = Array.isArray(itemsByDeck[child.id]) ? itemsByDeck[child.id] : [];
+                const childPending = childItems
+                    .filter((item) => item?.id && !done.has(`${child.id}::${item.id}`))
+                    .map((item) => String(item.name || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 8);
+                const bits = [];
+                if (childCur.length) {
+                    bits.push(`当前：${childCur.join('、')}`);
+                }
+                if (childPending.length) {
+                    bits.push(`接下来：${childPending.join('、')}`);
+                }
+                return `  └ ${child.name}${bits.length ? `｜${bits.join('｜')}` : ''}｜要推进它就申请抽「${deck.name}」`;
+            });
+            parts.push(`支线：\n${childLines.join('\n')}`);
+        }
+        if (extra) {
+            parts.push(`说明：${extra}`);
+        }
+        const tail = parts.join('\n  ');
         return `- ${deck.name}｜申请时写这串：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
     });
     const body = usable.length > 0
