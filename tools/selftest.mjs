@@ -337,7 +337,7 @@ test('旧包没有 summon 时补默认值', () => {
 section('持续时长');
 test('hold 默认是永久，旧数据会被补齐', () => {
     const deck = makeDeck();
-    assert.deepEqual(deck.hold, { mode: 'forever', turns: 3 });
+    assert.deepEqual(deck.hold, { mode: 'forever', turns: 3, days: 1 });
 });
 
 test('按轮数：抽中当轮保留，下一轮才到期', () => {
@@ -974,6 +974,19 @@ test('按天冷却：没到天数就抽不到，到了就能抽', () => {
     assert.deepEqual(availableItems(state, deck), []);
     ds.gameDay = 90;
     assert.equal(availableItems(state, deck).length, 1);
+});
+
+
+test('按天持续：到天数就清空', () => {
+    const state = createState('hold-days-seed', 10);
+    state.turn = 10;
+    state.gameDay = 5;
+    const deck = makeDeck({ hold: { mode: 'days', days: 2 }, cooldown: 0 });
+    drawDeck(state, deck, { force: true });
+    assert.equal(expireIfDue(state, deck), false);
+    state.gameDay = 7;
+    assert.equal(expireIfDue(state, deck), true);
+    assert.deepEqual(deckState(state, deck.id).current, []);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

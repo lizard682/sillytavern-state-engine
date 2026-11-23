@@ -94,15 +94,17 @@ const SUMMON_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 export const DEFAULT_HOLD = {
     mode: 'forever',
     turns: 3,
+    days: 1,
 };
 
-const HOLD_MODES = ['turns', 'forever', 'ai'];
+const HOLD_MODES = ['turns', 'days', 'forever', 'ai'];
 
 function normalizeHold(raw) {
     const h = isPlainObject(raw) ? raw : {};
     return {
         mode: HOLD_MODES.includes(h.mode) ? h.mode : DEFAULT_HOLD.mode,
         turns: asInt(h.turns, DEFAULT_HOLD.turns, 1),
+        days: asInt(h.days, DEFAULT_HOLD.days, 1),
     };
 }
 

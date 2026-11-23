@@ -168,11 +168,13 @@ function normalizeDeckShape(deck) {
     if (!deck.hold) {
         deck.hold = { ...DEFAULT_HOLD };
     } else {
-        if (!['turns', 'forever', 'ai'].includes(deck.hold.mode)) {
+        if (!['turns', 'days', 'forever', 'ai'].includes(deck.hold.mode)) {
             deck.hold.mode = DEFAULT_HOLD.mode;
         }
         const turns = Number(deck.hold.turns);
         deck.hold.turns = Number.isFinite(turns) ? Math.max(1, Math.floor(turns)) : DEFAULT_HOLD.turns;
+        const days = Number(deck.hold.days);
+        deck.hold.days = Number.isFinite(days) ? Math.max(1, Math.floor(days)) : DEFAULT_HOLD.days;
     }
     if (typeof deck.parent !== 'string') {
         deck.parent = DEFAULT_NESTING.parent;
@@ -1839,6 +1841,10 @@ function syncEditor(deck) {
     if (holdTurnsField) {
         holdTurnsField.toggleAttribute('hidden', hold.mode !== 'turns');
     }
+    const holdDaysField = root.querySelector('[data-deck-field="hold.days"]')?.closest('.se-field');
+    if (holdDaysField) {
+        holdDaysField.toggleAttribute('hidden', hold.mode !== 'days');
+    }
     const depthField = root.querySelector('[data-deck-field="inject.depth"]')?.closest('.se-field');
     if (depthField) {
         depthField.toggleAttribute('hidden', inject.position !== 'chat');
@@ -2687,6 +2693,7 @@ function renderEditor(store) {
                 <span>方式</span>
                 <select class="text_pole" data-deck-field="hold.mode">
                     <option value="turns" ${hold.mode === 'turns' ? 'selected' : ''}>按轮数</option>
+                    <option value="days" ${hold.mode === 'days' ? 'selected' : ''}>按游戏内天数</option>
                     <option value="forever" ${hold.mode === 'forever' ? 'selected' : ''}>永久（直到重抽或清空）</option>
                     <option value="ai" ${hold.mode === 'ai' ? 'selected' : ''}>由 AI 判断结束</option>
                 </select>
@@ -2695,8 +2702,12 @@ function renderEditor(store) {
                 <span>持续轮数</span>
                 <input type="number" class="text_pole" data-deck-field="hold.turns" min="1" step="1" value="${Number(hold.turns) || 1}">
             </label>
+            <label class="se-field" ${hold.mode === 'days' ? '' : 'hidden'}>
+                <span>持续天数</span>
+                <input type="number" class="text_pole" data-deck-field="hold.days" min="1" step="1" value="${Number(hold.days) || 1}">
+            </label>
         </div>
-        <div class="se-hint">按轮数时，抽中那一轮算第 1 轮；选「由 AI 判断结束」时，模型可以在回复里写 &lt;!--SE-END:${deck.id}--&gt; 主动结束。</div>
+        <div class="se-hint">按轮数时，抽中那一轮算第 1 轮；按天数时以卡里的 MVU 日期为准，抽中那天算第 1 天，卡里没有日期就不计时。选「由 AI 判断结束」时，模型可以在回复里写 &lt;!--SE-END:${deck.id}--&gt; 主动结束。</div>
 
         <div class="se-section-title">注入到哪</div>
         <div class="se-form se-inject-form">
@@ -2905,8 +2916,16 @@ function airEntries(store) {
             const total = Math.max(1, Number(hold.turns) || 1);
             const start = Number(ds.holdStart);
             const used = Number.isFinite(start) && start >= 0 ? Math.max(0, turn - start) : 0;
-            const left = hold.mode === 'turns' ? Math.max(0, total - used) : null;
-            const pct = hold.mode === 'turns' ? Math.max(0, Math.min(100, Math.round((left / total) * 100))) : 100;
+            let left = hold.mode === 'turns' ? Math.max(0, total - used) : null;
+            if (hold.mode === 'days') {
+                const days = Math.max(1, Number(hold.days) || 1);
+                const startDay = Number(ds.holdStartDay);
+                const nowDay = Number(store.state?.gameDay);
+                left = Number.isFinite(startDay) && startDay >= 0 && Number.isFinite(nowDay)
+                    ? Math.max(0, days - (nowDay - startDay))
+                    : null;
+            }
+            const pct = left === null ? 100 : Math.max(0, Math.min(100, Math.round((left / (hold.mode === 'days' ? Math.max(1, Number(hold.days) || 1) : total)) * 100)));
             return { deck, chain: deckChain(store.decks, deck), names, hold, left, pct, current };
         })
         .filter(Boolean);
@@ -2929,6 +2948,10 @@ function renderAir(store, expanded = false) {
         let timeMark;
         if (entry.hold.mode === 'turns') {
             timeMark = `<span class="se-air-bar"><i style="width:${entry.pct}%"></i></span><span class="se-air-left">剩 ${entry.left} 楼</span>`;
+        } else if (entry.hold.mode === 'days') {
+            timeMark = entry.left === null
+                ? `<span class="se-air-left se-air-dim">按天（卡里没有日期）</span>`
+                : `<span class="se-air-bar"><i style="width:${entry.pct}%"></i></span><span class="se-air-left">剩 ${entry.left} 天</span>`;
         } else if (entry.hold.mode === 'ai') {
             timeMark = `<span class="se-air-left se-air-dim">由 AI 结束</span>`;
         } else {
@@ -3346,7 +3369,7 @@ function bindPanelEvents() {
                 setDeckField(deckId, 'keywords', value);
             } else if (field === 'pick' || field === 'cooldown' || field === 'scan.depth' || field === 'inject.depth') {
                 setDeckField(deckId, field, Math.max(field === 'pick' ? 1 : 0, Number(value) || 0));
-            } else if (field === 'hold.turns') {
+            } else if (field === 'hold.turns' || field === 'hold.days') {
                 setDeckField(deckId, field, Math.max(1, Math.floor(Number(value) || 1)));
             } else {
                 setDeckField(deckId, field, value);

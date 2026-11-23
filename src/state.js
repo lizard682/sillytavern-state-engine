@@ -44,6 +44,7 @@ export function captureFrame(state) {
             current: Array.isArray(ds?.current) ? [...ds.current] : [],
             used: ds?.used === true,
             holdStart: Number.isFinite(Number(ds?.holdStart)) ? Number(ds.holdStart) : -1,
+            holdStartDay: Number.isFinite(Number(ds?.holdStartDay)) ? Number(ds.holdStartDay) : -1,
             itemTurns: { ...(ds?.itemTurns || {}) },
             gameDay: Number.isFinite(Number(ds?.gameDay)) ? Number(ds.gameDay) : null,
         };
@@ -81,6 +82,7 @@ export function restoreFrame(state, targetTurn) {
         ds.current = Array.isArray(snap.current) ? [...snap.current] : [];
         ds.used = snap.used === true;
         ds.holdStart = Number.isFinite(Number(snap.holdStart)) ? Number(snap.holdStart) : -1;
+        ds.holdStartDay = Number.isFinite(Number(snap.holdStartDay)) ? Number(snap.holdStartDay) : -1;
         ds.itemTurns = { ...(snap.itemTurns || {}) };
         ds.gameDay = Number.isFinite(Number(snap.gameDay)) ? Number(snap.gameDay) : null;
     }
@@ -156,6 +158,7 @@ export function deckState(state, deckId) {
     ds.nonce = Number(ds.nonce) || 0;
     if (!Number.isFinite(Number(ds.holdStart))) {
         ds.holdStart = -1;
+        ds.holdStartDay = -1;
     }
     return ds;
 }
@@ -304,9 +307,11 @@ export function drawDeck(state, deck, options = {}) {
     ds.lastDecisionTurn = turn;
     ds.holdStart = turn;
     ds.holdTurns = Math.max(1, Number(deck.hold?.turns) || 1);
+    ds.holdDays = Math.max(1, Number(deck.hold?.days) || 1);
     // 记下抽中时的「游戏内天数」，按天冷却的合集从这一天开始算。
     if (Number.isFinite(Number(state.gameDay))) {
         ds.gameDay = Number(state.gameDay);
+        ds.holdStartDay = Number(state.gameDay);
     }
 
     pushLedger(state, {
@@ -591,6 +596,30 @@ export function expireIfDue(state, deck) {
         return false;
     }
     const hold = deck.hold || {};
+    if (hold.mode === 'days') {
+        // 按游戏内天数：抽中那天算第 1 天，过满 days 天就清空。没有日期就不计时。
+        const startDay = Number(ds.holdStartDay);
+        const nowDay = Number(state.gameDay);
+        const days = Math.max(1, Number(hold.days) || 1);
+        if (!Number.isFinite(startDay) || startDay < 0 || !Number.isFinite(nowDay)) {
+            return false;
+        }
+        if (nowDay - startDay < days) {
+            return false;
+        }
+        const dropped = ds.current.slice();
+        ds.current = [];
+        ds.holdStart = -1;
+        ds.holdStartDay = -1;
+        pushLedger(state, {
+            deck: deck.id,
+            deckName: deck.name,
+            cause: 'expire',
+            picked: [],
+            note: `持续 ${days} 天到期：${dropped.join('、')}`,
+        });
+        return true;
+    }
     if (hold.mode !== 'turns') {
         return false;
     }
@@ -605,6 +634,7 @@ export function expireIfDue(state, deck) {
     const dropped = ds.current.slice();
     ds.current = [];
     ds.holdStart = -1;
+    ds.holdStartDay = -1;
     pushLedger(state, {
         deck: deck.id,
         deckName: deck.name,
@@ -624,6 +654,7 @@ export function endHold(state, deck, cause = 'ai-end') {
     const dropped = ds.current.slice();
     ds.current = [];
     ds.holdStart = -1;
+    ds.holdStartDay = -1;
     pushLedger(state, {
         deck: deck.id,
         deckName: deck.name,
@@ -656,6 +687,7 @@ export function clearCurrent(state, deck) {
     const removed = Array.isArray(ds.current) ? ds.current.slice() : [];
     ds.current = [];
     ds.holdStart = -1;
+    ds.holdStartDay = -1;
     ds.used = false;
     if (removed.length > 0) {
         pushLedger(state, {
