@@ -1143,13 +1143,17 @@ function refreshInjections() {
         }
     }
     // 导演提示只列此刻真的会生效的合集：绑定角色不在场、或只能被上级抽中的子合集，都别让模型白申请。
-    // 不可打断生效时，干脆只把锁定合集交给模型，免得它去申请一堆抽不到的清单。
+    // 不可打断生效时，干脆只把锁定合集交给模型——哪怕它是子合集，锁定期间它就是焦点。
     const lockDeck = activeLockDeck(store.state, store.decks);
-    const directorDecks = store.decks.filter((deck) => deck.enabled !== false
-        && deck.onlyFromParent !== true
-        && deck.summon?.only !== true
-        && bindingActive(deck, ctx)
-        && (!lockDeck || deck.id === lockDeck.id));
+    const directorDecks = store.decks.filter((deck) => {
+        if (deck.enabled === false || !bindingActive(deck, ctx)) {
+            return false;
+        }
+        if (lockDeck) {
+            return deck.id === lockDeck.id;
+        }
+        return deck.onlyFromParent !== true && deck.summon?.only !== true;
+    });
     const itemsByDeck = Object.fromEntries(store.decks.map((deck) => [deck.id, Array.isArray(deck.items) ? deck.items : []]));
     // 告诉模型「每份清单现在停在哪一条、后面还有哪些」——嵌套剧情线时它才知道下一幕是什么。
     const currentByDeck = Object.fromEntries(store.decks.map((deck) => {
@@ -1378,17 +1382,22 @@ function advanceOnGeneration() {
         if (deckExhausted(store.state, store.decks, deck.id)) {
             continue;
         }
-        // 「只能被上级抽中」的子合集，正常对话的自动/关键词/AI 都不碰它。
-        if (deck.onlyFromParent === true) {
-            continue;
-        }
-        // 有上级合集的，什么时候抽由上级决定：自己不参与楼层自动/关键词/AI 判定。
-        if (deck.parent) {
-            continue;
-        }
-        // 「只在被唤起时出场」的合集，普通对话的自动/关键词/AI 都不碰它。
-        if ((deck.summon || DEFAULT_SUMMON).only === true) {
-            continue;
+        // 开着「不可打断」的合集就是此刻的焦点：哪怕它是子合集 / 只能被上级抽中，
+        // 也允许 AI 直接推进它，否则锁住了却没人能抽，等于卡死。
+        const isLockedDeck = Boolean(lockDeck && deck.id === lockDeck.id);
+        if (!isLockedDeck) {
+            // 「只能被上级抽中」的子合集，正常对话的自动/关键词/AI 都不碰它。
+            if (deck.onlyFromParent === true) {
+                continue;
+            }
+            // 有上级合集的，什么时候抽由上级决定：自己不参与楼层自动/关键词/AI 判定。
+            if (deck.parent) {
+                continue;
+            }
+            // 「只在被唤起时出场」的合集，普通对话的自动/关键词/AI 都不碰它。
+            if ((deck.summon || DEFAULT_SUMMON).only === true) {
+                continue;
+            }
         }
         const trigger = deck.trigger || DEFAULT_TRIGGER;
         const ds = deckState(store.state, deck.id);
