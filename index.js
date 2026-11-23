@@ -2919,7 +2919,8 @@ function bindPanelEvents() {
             if (list.length === 0) {
                 toast('info', '公共库是空的');
             } else {
-                downloadJson(list.length === 1 ? list[0] : list, `state-engine-public-${Date.now()}.json`);
+                const packs = list.map((deck) => serializePack(deck));
+                downloadJson(packs.length === 1 ? packs[0] : packs, `state-engine-public-${Date.now()}.json`);
                 toast('success', `已导出公共库（${list.length} 个合集）`);
             }
         } else if (action === 'import-global') {
