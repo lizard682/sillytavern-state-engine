@@ -731,6 +731,50 @@ test('组合：同一轮多次抽取会各自配套，互不覆盖', () => {
     assert.ok(seen.has('红色的长裤') || seen.has('蓝色的长裤'));
 });
 
+// [条目冷却] 单条自己设定的冷却优先于合集设置
+test('条目冷却：刚抽中的那条在冷却轮数内不再出现', () => {
+    const deck = {
+        id: 'item-cd',
+        name: '冷却测试',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1, cooldown: 2 },
+            { id: 'b', name: 'B', text: 'B', weight: 1, cooldown: null },
+        ],
+    };
+    const state = createState('item-cd-seed', 1);
+    // 不靠抽签决定谁先出现，直接标记 A 在第 1 轮被抽过。
+    deckState(state, 'item-cd').itemTurns = { a: 1 };
+    const cooled = availableItems(state, deck).map((item) => item.id);
+    assert.deepEqual(cooled, ['b'], 'A 在冷却里，池子只剩 B');
+    // 到第 3 轮（1 + 2）A 又回到池子里
+    state.turn = 3;
+    const later = availableItems(state, deck).map((item) => item.id);
+    assert.ok(later.includes('a'), '冷却结束后 A 应该回到池子');
+});
+
+test('条目冷却：留空时不额外限制，跟合集设置走', () => {
+    const deck = {
+        id: 'item-cd-2',
+        name: '跟随合集',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'x', name: 'X', text: 'X', weight: 1, cooldown: null },
+            { id: 'y', name: 'Y', text: 'Y', weight: 1, cooldown: null },
+        ],
+    };
+    const state = createState('item-cd-2-seed', 1);
+    const seen = new Set();
+    for (let i = 0; i < 10; i += 1) {
+        const result = drawDeck(state, deck, { force: true });
+        seen.add(result.ids[0]);
+    }
+    assert.ok(seen.has('x') || seen.has('y'));
+    assert.equal(deckState(state, 'item-cd-2').itemTurns.x !== undefined || deckState(state, 'item-cd-2').itemTurns.y !== undefined, true);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);

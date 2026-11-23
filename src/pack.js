@@ -257,7 +257,7 @@ export function normalizeExcludes(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [], excludeSiblings: false };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -281,6 +281,10 @@ export function normalizeItem(raw, index = 0) {
         excludes: normalizeExcludes(raw.excludes),
         // 排除本合集的其它条目：同合集里任何别的条目出现过，这条就不进池（省得手写一长串）。
         excludeSiblings: raw.excludeSiblings === true,
+        // 条目自己的冷却（轮）。留空 = 跟随合集设置。
+        cooldown: Number.isFinite(Number(raw.cooldown)) && raw.cooldown !== '' && raw.cooldown !== null
+            ? Math.max(0, Math.floor(Number(raw.cooldown)))
+            : null,
     };
 }
 
@@ -385,6 +389,7 @@ export function serializePack(pack) {
             ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
             ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
             ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),
+            ...(Number.isFinite(Number(item.cooldown)) && item.cooldown !== null ? { cooldown: item.cooldown } : {}),
         })),
     };
 }

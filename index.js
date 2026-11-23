@@ -200,6 +200,8 @@ function normalizeDeckShape(deck) {
                 item.excludes = normalizeExcludes(item.excludes);
             }
             item.excludeSiblings = item.excludeSiblings === true;
+            const ownCooldown = Number(item.cooldown);
+            item.cooldown = Number.isFinite(ownCooldown) && item.cooldown !== null && item.cooldown !== '' ? Math.max(0, Math.floor(ownCooldown)) : null;
             delete item.situation;
         }
     });
@@ -1573,7 +1575,9 @@ function setItemField(deckId, itemId, field, value) {
             ? value === true || value === 'true'
             : field === 'excludeSiblings'
                 ? value === true || value === 'true'
-                : field === 'requires'
+                : field === 'cooldown'
+                    ? (String(value ?? '').trim() === '' ? null : Math.max(0, Math.floor(Number(value) || 0)))
+                    : field === 'requires'
                 ? normalizeRequires(value)
                 : field === 'excludes'
                     ? normalizeExcludes(value)
@@ -2025,6 +2029,10 @@ function renderItems(deck, store) {
                 <label class="se-check se-check-wide">
                     <input type="checkbox" data-item-field="excludeSiblings" ${item.excludeSiblings ? 'checked' : ''}>
                     <span>排除本合集的其它条目（同合集里只要先出现过别的条目，这条就永久不进池）</span>
+                </label>
+                <label class="se-check se-check-wide se-item-cooldown-row">
+                    <span>这条自己的冷却（轮）</span>
+                    <input type="number" class="text_pole se-item-cooldown" data-item-field="cooldown" min="0" step="1" value="${item.cooldown === null || item.cooldown === undefined ? '' : item.cooldown}" placeholder="跟随合集 ${Number(deck.cooldown) || 0} 轮" title="填数字后，这条被抽中后要隔这么多轮才可能再出现；留空就用合集设置的冷却（${Number(deck.cooldown) || 0} 轮）">
                 </label>
                 ${renderRequireList(deck, item, store, 'requires')}
                 ${renderRequireList(deck, item, store, 'excludes')}

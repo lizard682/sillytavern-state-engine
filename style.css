@@ -466,6 +466,25 @@
     gap: 10px;
 }
 
+/* 「这条自己的冷却」：标签在左、输入框在右，别被 se-check 的整行布局拉散 */
+#state-engine-panel .se-item-cooldown-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+#state-engine-panel .se-item-cooldown-row > span {
+    flex: 0 0 auto;
+}
+
+#state-engine-panel .se-item-cooldown {
+    flex: 0 0 120px;
+    width: 120px;
+    min-height: 34px;
+    text-align: center;
+}
+
 #state-engine-panel .se-item-name,
 #state-engine-panel .se-item-text {
     width: 100%;

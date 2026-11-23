@@ -84,6 +84,7 @@ export function deckState(state, deckId) {
     const ds = state.decks[key];
     ds.current ||= [];
     ds.recent ||= [];
+    ds.itemTurns ||= {};
     ds.nonce = Number(ds.nonce) || 0;
     if (!Number.isFinite(Number(ds.holdStart))) {
         ds.holdStart = -1;
@@ -219,6 +220,9 @@ export function drawDeck(state, deck, options = {}) {
 
     ds.current = ids;
     ds.recent.push(...ids);
+    for (const item of picked) {
+        ds.itemTurns[item.id] = turn;
+    }
     const keep = Math.max(cooldown, 8);
     if (ds.recent.length > keep) {
         ds.recent = ds.recent.slice(-keep);
@@ -297,9 +301,19 @@ export function availableItems(state, deck) {
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
     const excluded = new Set(cooldown > 0 ? ds.recent.slice(-cooldown) : []);
     const done = doneSet(state);
+    const turn = Number(state.turn) || 0;
+    const itemTurns = ds.itemTurns && typeof ds.itemTurns === 'object' ? ds.itemTurns : {};
     return deck.items.filter((item) => {
         if (excluded.has(item.id)) {
             return false;
+        }
+        // 条目自己的冷却：覆盖合集设置。按「上次抽中那一轮」往后数，没抽过的不受影响。
+        const ownCooldown = Number(item.cooldown);
+        if (Number.isFinite(ownCooldown) && ownCooldown > 0) {
+            const last = Number(itemTurns[item.id]);
+            if (Number.isFinite(last) && last >= 0 && turn - last < ownCooldown) {
+                return false;
+            }
         }
         if ((Number(item.weight) || 0) <= 0) {
             return false;
