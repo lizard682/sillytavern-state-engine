@@ -1446,3 +1446,41 @@
     flex: 1 1 240px;
     min-width: 0;
 }
+
+#state-engine-panel .se-global-block {
+    border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16));
+    margin-top: 10px;
+    padding-top: 10px;
+}
+
+#state-engine-panel .se-global-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+#state-engine-panel .se-global-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#state-engine-panel .se-global-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+}
+
+#state-engine-panel .se-global-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#state-engine-panel .se-global-count {
+    color: var(--SmartThemeEmColor, #9aa0a6);
+    font-size: 12px;
+}

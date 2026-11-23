@@ -72,7 +72,7 @@ const PANEL_ID = 'state-engine-panel';
 const BUTTON_ID = 'state-engine-button';
 
 let context;
-let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, autoCardSync: false };
+let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, autoCardSync: false, globalDecks: [] };
 /** 合集数据改动过、还没写进角色卡。勾了「导出时自动带上」时，导出那一刻才真正写。 */
 let cardSyncDirty = false;
 let selectedDeckId = null;
@@ -833,6 +833,122 @@ function importCardDecks(options = {}) {
         toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
     }
     return { added, replaced, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// 公共合集库：存在扩展设置里，跨聊天、跨角色卡。只做「复制一份」，
+// 复制进聊天后就变成普通合集，各聊天的修改互不影响。
+// ---------------------------------------------------------------------------
+
+function globalDecks() {
+    return Array.isArray(settings.globalDecks) ? settings.globalDecks : [];
+}
+
+function saveGlobalDecks(list) {
+    settings.globalDecks = Array.isArray(list) ? list : [];
+    saveSettings();
+}
+
+/** 把当前聊天里的某个合集存进公共库（同 id 视为更新）。 */
+function publishDeckToGlobal(deckId) {
+    const store = getStore();
+    const deck = store?.decks.find((item) => item.id === deckId);
+    if (!deck) {
+        toast('error', '先在左栏选一个合集');
+        return;
+    }
+    const snapshot = normalizeDeckShape(JSON.parse(JSON.stringify(deck)));
+    const list = globalDecks().filter((item) => item?.id !== snapshot.id);
+    list.push(snapshot);
+    saveGlobalDecks(list);
+    renderGlobalBlock();
+    toast('success', `「${snapshot.name || snapshot.id}」已发布到公共库（${snapshot.items?.length || 0} 条）`);
+}
+
+/** 把公共库里的合集复制一份到当前聊天，id 冲突时自动改名。 */
+function copyGlobalToChat(globalId) {
+    const source = globalDecks().find((item) => item?.id === globalId);
+    const store = getStore({ create: true });
+    if (!source || !store) {
+        toast('error', '先打开一个聊天');
+        return;
+    }
+    const deck = normalizeDeckShape(JSON.parse(JSON.stringify(source)));
+    const base = deck.id || 'deck';
+    let nextId = base;
+    let n = 2;
+    while (store.decks.some((item) => item.id === nextId)) {
+        nextId = `${base}-${n}`;
+        n += 1;
+    }
+    deck.id = nextId;
+    if (nextId !== base) {
+        deck.name = `${deck.name || base}（副本）`;
+    }
+    store.decks.push(deck);
+    selectedDeckId = deck.id;
+    saveStore({ immediate: true });
+    refreshInjections();
+    renderPanel();
+    toast('success', `已把「${deck.name || deck.id}」复制到当前聊天`);
+}
+
+function removeGlobalDeck(globalId) {
+    saveGlobalDecks(globalDecks().filter((item) => item?.id !== globalId));
+    renderGlobalBlock();
+}
+
+function renderGlobalBlock() {
+    const list = document.getElementById('se-global-list');
+    if (!list) {
+        return;
+    }
+    const decks = globalDecks();
+    if (decks.length === 0) {
+        list.innerHTML = '<p class="se-muted">公共库是空的。选中一个合集后点「把当前合集发布到公共库」，以后任何聊天都能一键复制。</p>';
+        return;
+    }
+    list.innerHTML = decks.map((deck) => `
+        <div class="se-global-row">
+            <span class="se-global-name">${escapeHtml(deck.name || deck.id)}</span>
+            <span class="se-global-count">${(deck.items || []).length} 条</span>
+            <button type="button" class="menu_button" data-action="copy-global" data-deck="${escapeHtml(deck.id)}">复制到本聊天</button>
+            <button type="button" class="menu_button" data-action="delete-global" data-deck="${escapeHtml(deck.id)}">移出公共库</button>
+        </div>
+    `).join('');
+}
+
+async function importGlobalFiles(files) {
+    const list = [...globalDecks()];
+    let added = 0;
+    for (const file of files) {
+        let parsed;
+        try {
+            parsed = JSON.parse(await file.text());
+        } catch (error) {
+            toast('error', `${file.name} 不是合法 JSON`);
+            continue;
+        }
+        const packs = Array.isArray(parsed) ? parsed : [parsed];
+        for (const raw of packs) {
+            const result = validatePack(raw);
+            if (!result.ok) {
+                toast('error', `${file.name}：${result.errors[0] || '格式不对'}`);
+                continue;
+            }
+            const deck = normalizeDeckShape(JSON.parse(JSON.stringify(result.pack)));
+            const index = list.findIndex((item) => item?.id === deck.id);
+            if (index >= 0) {
+                list[index] = deck;
+            } else {
+                list.push(deck);
+                added += 1;
+            }
+        }
+    }
+    saveGlobalDecks(list);
+    renderGlobalBlock();
+    toast('success', `公共库已更新（新增 ${added} 个）`);
 }
 
 /**
@@ -1630,6 +1746,10 @@ function downloadText(text, filename, mime = 'text/markdown') {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+function downloadJson(data, filename) {
+    downloadText(JSON.stringify(data, null, 2), filename, 'application/json');
+}
+
 /**
  * 给「其他 AI」看的合集编写说明书：把格式、字段、写法建议和一份能直接导入的示例
  * 打包成一篇 Markdown，用户丢给别的模型就能让它照着写合集。
@@ -2347,6 +2467,7 @@ function renderPanel() {
     renderAir(store, airExpanded);
     renderSidebar(store);
     renderEditor(store);
+    renderGlobalBlock();
     updateInjectPreview();
 }
 
@@ -2403,6 +2524,16 @@ function buildPanel() {
                 <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
+                <div class="se-global-block">
+                    <div class="se-section-title">公共合集库 <span class="se-muted">（存在插件设置里，任何聊天、任何角色卡都能用）</span></div>
+                    <div class="se-global-actions">
+                        <button type="button" class="menu_button" data-action="publish-global">把当前合集发布到公共库</button>
+                        <button type="button" class="menu_button" data-action="export-global">导出公共库</button>
+                        <button type="button" class="menu_button" data-action="import-global">从 JSON 导入到公共库</button>
+                        <input id="se-global-file" type="file" accept="application/json,.json" multiple hidden>
+                    </div>
+                    <div id="se-global-list" class="se-global-list"></div>
+                </div>
                 <details class="se-ledger se-inject-preview-block">
                     <summary>本轮注入预览（真正发给 AI 的内容）</summary>
                     <pre id="se-inject-preview"></pre>
@@ -2660,6 +2791,11 @@ function bindPanelEvents() {
         event.target.value = '';
     });
 
+    root.querySelector('#se-global-file')?.addEventListener('change', (event) => {
+        importGlobalFiles(event.target.files);
+        event.target.value = '';
+    });
+
     root.querySelector('#se-ai-template')?.addEventListener('change', (event) => {
         settings.aiTemplate = event.target.value || DEFAULT_AI_TEMPLATE;
         saveSettings();
@@ -2772,6 +2908,22 @@ function bindPanelEvents() {
                 refreshInjections();
                 renderPanel();
             }
+        } else if (action === 'publish-global') {
+            publishDeckToGlobal(deckId);
+        } else if (action === 'copy-global') {
+            copyGlobalToChat(deckId);
+        } else if (action === 'delete-global') {
+            removeGlobalDeck(deckId);
+        } else if (action === 'export-global') {
+            const list = globalDecks();
+            if (list.length === 0) {
+                toast('info', '公共库是空的');
+            } else {
+                downloadJson(list.length === 1 ? list[0] : list, `state-engine-public-${Date.now()}.json`);
+                toast('success', `已导出公共库（${list.length} 个合集）`);
+            }
+        } else if (action === 'import-global') {
+            document.getElementById('se-global-file')?.click();
         } else if (action === 'copy-deck-id') {
             const marker = `<!--SE:${deckId}-->`;
             const done = () => toast('success', `已复制 ${marker}`);
