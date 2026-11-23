@@ -103,7 +103,7 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}) {
         const more = items.length > names.length ? `…（共 ${items.length} 条）` : '';
         const options = names.length ? `${names.join('、')}${more}` : '';
         const tail = [options, extra ? `说明：${extra}` : ''].filter(Boolean).join('；');
-        return `- ${deck.name}：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
+        return `- ${deck.name}｜申请时写这串：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
     });
     const body = usable.length > 0
         ? (template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', lines.join('\n'))

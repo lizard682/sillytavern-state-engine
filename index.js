@@ -2137,6 +2137,11 @@ function renderEditor(store) {
                 <span>合集名称</span>
                 <input type="text" class="text_pole" data-deck-field="name" value="${escapeHtml(deck.name || '')}">
             </label>
+            <div class="se-deck-id-row">
+                <span class="se-deck-id-label">合集标记</span>
+                <code class="se-deck-id">${escapeHtml(`<!--SE:${deck.id}-->`)}</code>
+                <button type="button" class="menu_button se-copy-id" data-action="copy-deck-id" title="复制这串标记，可以写进「AI 判定补充说明」里指定什么时候调用它">复制</button>
+            </div>
             <label class="se-field" title="结构关系：上层合集抽签时先抽子合集，再让子合集抽自己的条目，最多三层。">
                 <span>上级合集</span>
                 <select class="text_pole" data-deck-field="parent">${parentSelect}</select>
@@ -2766,6 +2771,15 @@ function bindPanelEvents() {
                 saveStore();
                 refreshInjections();
                 renderPanel();
+            }
+        } else if (action === 'copy-deck-id') {
+            const marker = `<!--SE:${deckId}-->`;
+            const done = () => toast('success', `已复制 ${marker}`);
+            const fallback = () => window.prompt('复制这串标记：', marker);
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(marker).then(done).catch(fallback);
+            } else {
+                fallback();
             }
         } else if (action === 'clear-current') {
             const store = getStore();
