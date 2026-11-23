@@ -266,7 +266,7 @@ export function normalizeExcludes(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null, hold: null };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -296,6 +296,8 @@ export function normalizeItem(raw, index = 0) {
         cooldown: Number.isFinite(Number(raw.cooldown)) && raw.cooldown !== '' && raw.cooldown !== null
             ? Math.max(0, Math.floor(Number(raw.cooldown)))
             : null,
+        // 条目自己的持续时长。留空 = 跟随合集设置。
+        hold: isPlainObject(raw.hold) ? normalizeHold(raw.hold) : null,
     };
 }
 
@@ -404,6 +406,7 @@ export function serializePack(pack) {
             ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
             ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),
             ...(Number.isFinite(Number(item.cooldown)) && item.cooldown !== null ? { cooldown: item.cooldown } : {}),
+            ...(isPlainObject(item.hold) ? { hold: normalizeHold(item.hold) } : {}),
         })),
     };
 }

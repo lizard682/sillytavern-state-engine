@@ -159,6 +159,7 @@ export function deckState(state, deckId) {
     if (!Number.isFinite(Number(ds.holdStart))) {
         ds.holdStart = -1;
         ds.holdStartDay = -1;
+        ds.hold = null;
     }
     return ds;
 }
@@ -306,8 +307,12 @@ export function drawDeck(state, deck, options = {}) {
     ds.lastTurn = turn;
     ds.lastDecisionTurn = turn;
     ds.holdStart = turn;
-    ds.holdTurns = Math.max(1, Number(deck.hold?.turns) || 1);
-    ds.holdDays = Math.max(1, Number(deck.hold?.days) || 1);
+    // 持续时长优先看「抽中这一条」自己的设置，没设就跟随合集。
+    const itemHold = picked.find((entry) => entry && entry.hold)?.hold;
+    const effectiveHold = itemHold || deck.hold || null;
+    ds.hold = effectiveHold ? { ...effectiveHold } : null;
+    ds.holdTurns = Math.max(1, Number(effectiveHold?.turns) || 1);
+    ds.holdDays = Math.max(1, Number(effectiveHold?.days) || 1);
     // 记下抽中时的「游戏内天数」，按天冷却的合集从这一天开始算。
     if (Number.isFinite(Number(state.gameDay))) {
         ds.gameDay = Number(state.gameDay);
@@ -595,7 +600,7 @@ export function expireIfDue(state, deck) {
     if (!Array.isArray(ds.current) || ds.current.length === 0) {
         return false;
     }
-    const hold = deck.hold || {};
+    const hold = ds.hold || deck.hold || {};
     if (hold.mode === 'days') {
         // 按游戏内天数：抽中那天算第 1 天，过满 days 天就清空。没有日期就不计时。
         const startDay = Number(ds.holdStartDay);
@@ -611,6 +616,7 @@ export function expireIfDue(state, deck) {
         ds.current = [];
         ds.holdStart = -1;
         ds.holdStartDay = -1;
+        ds.hold = null;
         pushLedger(state, {
             deck: deck.id,
             deckName: deck.name,
@@ -635,6 +641,7 @@ export function expireIfDue(state, deck) {
     ds.current = [];
     ds.holdStart = -1;
     ds.holdStartDay = -1;
+    ds.hold = null;
     pushLedger(state, {
         deck: deck.id,
         deckName: deck.name,
@@ -655,6 +662,7 @@ export function endHold(state, deck, cause = 'ai-end') {
     ds.current = [];
     ds.holdStart = -1;
     ds.holdStartDay = -1;
+    ds.hold = null;
     pushLedger(state, {
         deck: deck.id,
         deckName: deck.name,
@@ -688,6 +696,7 @@ export function clearCurrent(state, deck) {
     ds.current = [];
     ds.holdStart = -1;
     ds.holdStartDay = -1;
+    ds.hold = null;
     ds.used = false;
     if (removed.length > 0) {
         pushLedger(state, {

@@ -215,6 +215,16 @@ function normalizeDeckShape(deck) {
             item.initial = item.initial === true;
             const ownCooldown = Number(item.cooldown);
             item.cooldown = Number.isFinite(ownCooldown) && item.cooldown !== null && item.cooldown !== '' ? Math.max(0, Math.floor(ownCooldown)) : null;
+            // 条目自己的持续时长：没设就是 null（跟随合集）。
+            if (item.hold && typeof item.hold === 'object' && ['turns', 'days', 'forever', 'ai'].includes(item.hold.mode)) {
+                item.hold = {
+                    mode: item.hold.mode,
+                    turns: Math.max(1, Number(item.hold.turns) || 3),
+                    days: Math.max(1, Number(item.hold.days) || 1),
+                };
+            } else {
+                item.hold = null;
+            }
             delete item.situation;
         }
     });
@@ -1980,7 +1990,29 @@ function setItemField(deckId, itemId, field, value) {
     if (!store || !deck || !item) {
         return;
     }
-    item[field] = field === 'weight'
+    if (field === 'hold.mode') {
+        // 空值 = 这条不单独设，跟随合集。
+        const mode = String(value || '');
+        if (!mode) {
+            item.hold = null;
+        } else {
+            const base = item.hold && typeof item.hold === 'object' ? item.hold : {};
+            item.hold = {
+                mode,
+                turns: Math.max(1, Number(base.turns) || 3),
+                days: Math.max(1, Number(base.days) || 1),
+            };
+        }
+    } else if (field === 'hold.turns' || field === 'hold.days') {
+        const base = item.hold && typeof item.hold === 'object' ? item.hold : { mode: 'turns', turns: 3, days: 1 };
+        item.hold = {
+            mode: base.mode || 'turns',
+            turns: Math.max(1, Number(base.turns) || 3),
+            days: Math.max(1, Number(base.days) || 1),
+        };
+        item.hold[field.split('.')[1]] = Math.max(1, Math.floor(Number(value) || 1));
+    } else {
+        item[field] = field === 'weight'
         ? Math.max(0, Number(value) || 0)
         : field === 'once'
             ? value === true || value === 'true'
@@ -1995,6 +2027,7 @@ function setItemField(deckId, itemId, field, value) {
                 : field === 'excludes'
                     ? normalizeExcludes(value)
                     : value;
+    }
     saveStore();
     refreshInjections();
     // 改名字时当前值/侧栏里的显示要跟着变，但不整块重绘。
@@ -2419,6 +2452,20 @@ function renderRequireList(deck, item, store, kind = 'requires') {
         </details>`;
 }
 
+function holdLabel(hold) {
+    const h = hold || {};
+    if (h.mode === 'turns') {
+        return `按轮数 ${Number(h.turns) || 3} 轮`;
+    }
+    if (h.mode === 'days') {
+        return `按天数 ${Number(h.days) || 1} 天`;
+    }
+    if (h.mode === 'ai') {
+        return '由 AI 结束';
+    }
+    return '一直保留';
+}
+
 function renderItems(deck, store) {
     const items = deck.items || [];
     const done = doneSet(store.state);
@@ -2462,6 +2509,24 @@ function renderItems(deck, store) {
                 <label class="se-check se-check-wide se-item-cooldown-row">
                     <span>这条自己的冷却（轮）</span>
                     <input type="number" class="text_pole se-item-cooldown" data-item-field="cooldown" min="0" step="1" value="${item.cooldown === null || item.cooldown === undefined ? '' : item.cooldown}" placeholder="跟随合集 ${Number(deck.cooldown) || 0} 轮" title="填数字后，这条被抽中后要隔这么多轮才可能再出现；留空就用合集设置的冷却（${Number(deck.cooldown) || 0} 轮）">
+                </label>
+                <label class="se-field se-item-hold-mode">
+                    <span>这条自己的持续</span>
+                    <select class="text_pole" data-item-field="hold.mode">
+                        <option value="" ${item.hold ? '' : 'selected'}>跟随合集（${holdLabel(deck.hold)}）</option>
+                        <option value="turns" ${item.hold?.mode === 'turns' ? 'selected' : ''}>按轮数</option>
+                        <option value="days" ${item.hold?.mode === 'days' ? 'selected' : ''}>按游戏内天数</option>
+                        <option value="forever" ${item.hold?.mode === 'forever' ? 'selected' : ''}>一直保留</option>
+                        <option value="ai" ${item.hold?.mode === 'ai' ? 'selected' : ''}>由 AI 结束</option>
+                    </select>
+                </label>
+                <label class="se-field se-item-hold-turns" ${item.hold?.mode === 'turns' ? '' : 'hidden'}>
+                    <span>持续轮数</span>
+                    <input type="number" class="text_pole" data-item-field="hold.turns" min="1" step="1" value="${Number(item.hold?.turns) || 3}">
+                </label>
+                <label class="se-field se-item-hold-days" ${item.hold?.mode === 'days' ? '' : 'hidden'}>
+                    <span>持续天数</span>
+                    <input type="number" class="text_pole" data-item-field="hold.days" min="1" step="1" value="${Number(item.hold?.days) || 1}">
                 </label>
                 <div class="se-require-slot" data-slot="requires"></div>
                 <div class="se-require-slot" data-slot="excludes"></div>
@@ -2912,7 +2977,7 @@ function airEntries(store) {
             }
             const items = deck.items || [];
             const names = current.map((id) => items.find((item) => item.id === id)?.name || id);
-            const hold = deck.hold || DEFAULT_HOLD;
+            const hold = ds.hold || deck.hold || DEFAULT_HOLD;
             const total = Math.max(1, Number(hold.turns) || 1);
             const start = Number(ds.holdStart);
             const used = Number.isFinite(start) && start >= 0 ? Math.max(0, turn - start) : 0;
@@ -3420,6 +3485,11 @@ function bindPanelEvents() {
                 // 勾选框传 checked；普通输入框传 value。
                 const value = target.type === 'checkbox' ? target.checked : target.value;
                 setItemField(deckId, row.dataset.item, target.dataset.itemField, value);
+                // 「这条自己的持续」选轮数/天数时，把对应的数字框显出来。
+                if (target.dataset.itemField === 'hold.mode') {
+                    row.querySelector('.se-item-hold-turns')?.toggleAttribute('hidden', value !== 'turns');
+                    row.querySelector('.se-item-hold-days')?.toggleAttribute('hidden', value !== 'days');
+                }
             }
         } else if (target.dataset.requireRef || target.dataset.excludeRef) {
             const row = target.closest('.se-item-row');

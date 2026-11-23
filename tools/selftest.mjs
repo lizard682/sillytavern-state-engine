@@ -989,6 +989,25 @@ test('按天持续：到天数就清空', () => {
     assert.deepEqual(deckState(state, deck.id).current, []);
 });
 
+
+test('条目自己的持续时长优先于合集设置', () => {
+    const state = createState('item-hold-seed', 10);
+    state.turn = 10;
+    state.gameDay = 1;
+    const deck = makeDeck({
+        cooldown: 0,
+        hold: { mode: 'turns', turns: 5 },
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1, hold: { mode: 'turns', turns: 1 } },
+        ],
+    });
+    drawDeck(state, deck, { force: true });
+    assert.equal(deckState(state, deck.id).hold.mode, 'turns');
+    assert.equal(deckState(state, deck.id).hold.turns, 1);
+    state.turn = 11;
+    assert.equal(expireIfDue(state, deck), true);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);
