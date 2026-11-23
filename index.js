@@ -72,7 +72,9 @@ const PANEL_ID = 'state-engine-panel';
 const BUTTON_ID = 'state-engine-button';
 
 let context;
-let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4 };
+let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, autoCardSync: false };
+/** 合集数据改动过、还没写进角色卡。勾了「导出时自动带上」时，导出那一刻才真正写。 */
+let cardSyncDirty = false;
 let selectedDeckId = null;
 let airExpanded = false;
 // 用户手动关掉「卡里带了合集」提示条后，记住是哪张卡、多少个，避免一直弹。
@@ -256,6 +258,7 @@ function getStore({ create = false } = {}) {
  * 抽签/导入/删除这类一次性动作传 immediate，避免刚点完就切聊天导致丢状态。
  */
 function saveStore({ immediate = false } = {}) {
+    cardSyncDirty = true;
     const ctx = liveContext();
     if (immediate) {
         ctx?.saveMetadata?.();
@@ -616,26 +619,36 @@ async function saveCharacterMerge(payload) {
 }
 
 /** 把「绑定到当前角色的合集 + 和它们有关联的合集」写进角色卡。 */
-async function exportDecksToCard() {
+async function exportDecksToCard(options = {}) {
+    const { silent = false } = options;
     const ctx = liveContext();
     const character = currentCharacterCard();
     const store = getStore();
     if (!character?.avatar) {
-        toast('error', '先在右侧选一张角色卡');
-        return;
+        if (!silent) {
+            toast('error', '先在右侧选一张角色卡');
+        }
+        return false;
     }
     if (!store || store.decks.length === 0) {
-        toast('error', '当前聊天还没有合集');
-        return;
+        if (!silent) {
+            toast('error', '当前聊天还没有合集');
+        }
+        return false;
     }
     const seeds = boundDeckIds(store, ctx);
     const chosen = collectRelatedDecks(store.decks, seeds.length > 0 ? seeds : store.decks.map((deck) => deck.id));
-    const list = chosen.map((deck) => deck.name || deck.id).join('、');
-    const ok = window.confirm(
-        `把 ${chosen.length} 个合集写进「${character.name || '这张卡'}」？\n\n${list}\n\n写进去之后，你在酒馆里导出这张角色卡时，数据会跟着卡一起走。\n同时会把这张卡的开局第一条换成「需要安装插件」的提醒，原来的开局挪到第二开局；装了插件的人打开时会自动换回来。`,
-    );
-    if (!ok) {
-        return;
+    if (chosen.length === 0) {
+        return false;
+    }
+    if (!silent) {
+        const list = chosen.map((deck) => deck.name || deck.id).join('、');
+        const ok = window.confirm(
+            `把 ${chosen.length} 个合集写进「${character.name || '这张卡'}」？\n\n${list}\n\n写进去之后，你在酒馆里导出这张角色卡时，数据会跟着卡一起走。\n同时会把这张卡的开局第一条换成「需要安装插件」的提醒，原来的开局挪到第二开局；装了插件的人打开时会自动换回来。`,
+        );
+        if (!ok) {
+            return false;
+        }
     }
     const decks = JSON.parse(JSON.stringify(chosen));
     // 第一次导出记下原文；以后再导出时沿用原文，避免把提醒本身当成开局又备份一次。
@@ -692,12 +705,67 @@ async function exportDecksToCard() {
         if (data.character_book) {
             character.data.character_book = data.character_book;
         }
-        toast('success', `已把 ${decks.length} 个合集写进「${character.name || '这张卡'}」`);
-        renderPanel();
+        if (!silent) {
+            toast('success', `已把 ${decks.length} 个合集写进「${character.name || '这张卡'}」`);
+        }
+        cardSyncDirty = false;
+        if (!silent) {
+            renderPanel();
+        }
+        return true;
     } catch (error) {
         console.error('[state-engine] 写角色卡失败', error);
-        toast('error', error.message || '写角色卡失败');
+        if (!silent) {
+            toast('error', error.message || '写角色卡失败');
+        }
+        return false;
     }
+}
+
+/**
+ * 勾了「导出角色卡时自动带上合集」之后：
+ * 在酒馆把卡发出去之前，先把手上的合集写进卡；导出完成后再把本地卡的开场白恢复，
+ * 免得你自己的卡一直停在「请安装插件」的提醒状态。
+ */
+function installCardExportHook() {
+    if (installCardExportHook.installed) {
+        return;
+    }
+    installCardExportHook.installed = true;
+    const originalFetch = window.fetch;
+    installCardExportHook.originalFetch = originalFetch;
+    window.fetch = async function patchedFetch(input, init) {
+        let url = '';
+        try {
+            url = typeof input === 'string' ? input : String(input?.url || '');
+        } catch {
+            url = '';
+        }
+        const isExport = url.includes('/api/characters/export');
+        const autoSync = settings.autoCardSync === true;
+        if (!isExport || !autoSync || !cardSyncDirty) {
+            return originalFetch.call(this, input, init);
+        }
+        const character = currentCharacterCard();
+        if (!character?.avatar) {
+            return originalFetch.call(this, input, init);
+        }
+        let wrote = false;
+        try {
+            wrote = await exportDecksToCard({ silent: true });
+        } catch (error) {
+            console.error('[state-engine] 导出前同步失败', error);
+        }
+        const response = await originalFetch.call(this, input, init);
+        if (wrote) {
+            try {
+                await restoreFirstMesFor(character);
+            } catch (error) {
+                console.error('[state-engine] 导出后恢复开场白失败', error);
+            }
+        }
+        return response;
+    };
 }
 
 /** 角色卡里有、当前聊天里还没有的合集。 */
@@ -2204,6 +2272,10 @@ function renderPanel() {
     if (aiDepthInput && document.activeElement !== aiDepthInput) {
         aiDepthInput.value = String(Math.max(0, Number(settings.aiDepth) || 4));
     }
+    const autoCardSyncInput = root.querySelector('#se-auto-card-sync');
+    if (autoCardSyncInput) {
+        autoCardSyncInput.checked = settings.autoCardSync === true;
+    }
     if (!store) {
         const list = root.querySelector('#se-deck-list');
         const editor = root.querySelector('#se-editor');
@@ -2265,6 +2337,10 @@ function buildPanel() {
                     <input id="se-ai-depth" type="number" class="text_pole" min="0" step="1">
                 </label>
                 <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认模板</button>
+                <label class="se-check se-check-wide">
+                    <input type="checkbox" id="se-auto-card-sync">
+                    <span>导出角色卡时自动带上合集（勾上后，你在酒馆里点「导出」的那一刻会先把合集写进卡，不用每次点「随卡导出」）</span>
+                </label>
                 <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
@@ -2373,26 +2449,72 @@ function renderAir(store, expanded = false) {
     }
 }
 
-/** 面板里「这张卡自带了合集」的提示条。 */
-function renderCardHint() {
-    const hint = document.getElementById('se-card-hint');
-    if (!hint) {
+/**
+ * 角色卡自带合集时，用酒馆自己的弹窗问一句要不要导入。
+ * 不再在插件面板里放提示条——不是每个玩家都会去开插件面板。
+ */
+let cardImportPopupKey = '';
+let cardImportPopupOpen = false;
+
+async function maybeShowCardImportPopup() {
+    if (cardImportPopupOpen) {
         return;
     }
     const pending = pendingCardDecks();
-    const character = currentCharacterCard();
-    const key = pending.length > 0 ? `${character?.avatar || ''}:${pending.length}` : '';
-    if (pending.length === 0 || key === cardHintDismissed) {
-        hint.hidden = true;
-        hint.innerHTML = '';
+    if (pending.length === 0) {
         return;
     }
+    const character = currentCharacterCard();
+    const key = `${character?.avatar || ''}:${pending.length}`;
+    if (key === cardHintDismissed || key === cardImportPopupKey) {
+        return;
+    }
+    cardImportPopupOpen = true;
+    cardImportPopupKey = key;
     const names = pending.map((deck) => deck.name || deck.id).join('、');
-    hint.hidden = false;
-    hint.innerHTML = `
-        <span class="se-card-hint-text">「${escapeHtml(character?.name || '这张卡')}」自带了 ${pending.length} 个合集：${escapeHtml(names)}</span>
-        <button type="button" class="menu_button" data-action="import-card-decks">导入</button>
-        <button type="button" class="menu_button" data-action="dismiss-card-hint">先不用</button>`;
+    const title = `这张卡自带了 ${pending.length} 个合集`;
+    const body = `「${escapeHtml(character?.name || '这张卡')}」里带着：${escapeHtml(names)}。<br><br>要把它们导入到当前聊天吗？导入后这些合集才会参与抽取。`;
+    try {
+        let PopupCtor = globalThis.Popup;
+        let kind = globalThis.POPUP_TYPE?.CONFIRM;
+        if (typeof PopupCtor !== 'function') {
+            // 酒馆把弹窗组件放在 /scripts/popup.js，没有挂到全局。
+            const popupModule = await import('/scripts/popup.js');
+            PopupCtor = popupModule.Popup;
+            kind = popupModule.POPUP_TYPE?.CONFIRM;
+        }
+        if (typeof PopupCtor === 'function' && kind !== undefined) {
+            const popup = new PopupCtor(body, kind, '', {
+                okButton: '导入',
+                cancelButton: '先不用',
+                wide: false,
+            });
+            const confirmed = await popup.show();
+            if (confirmed) {
+                importCardDecks();
+            } else {
+                cardHintDismissed = key;
+            }
+        } else if (window.confirm(`${title}\n\n${body.replace(/<br\s*\/?>/g, '\n').replace(/<\/?[^>]+>/g, '')}`)) {
+            importCardDecks();
+        } else {
+            cardHintDismissed = key;
+        }
+    } catch (error) {
+        console.warn('[state-engine] 导入提示弹窗失败', error);
+    } finally {
+        cardImportPopupOpen = false;
+    }
+}
+
+/** 面板里不再显示提示条，统一走弹窗。 */
+function renderCardHint() {
+    const hint = document.getElementById('se-card-hint');
+    if (hint) {
+        hint.hidden = true;
+        hint.innerHTML = '';
+    }
+    maybeShowCardImportPopup();
 }
 
 function ensureTopBarEntry() {
@@ -2485,6 +2607,17 @@ function bindPanelEvents() {
         saveSettings();
         refreshInjections();
         toast('success', `AI 判定提示改到倒数第 ${settings.aiDepth} 条之前`);
+    });
+
+    root.querySelector('#se-auto-card-sync')?.addEventListener('change', (event) => {
+        settings.autoCardSync = event.target.checked === true;
+        saveSettings();
+        if (settings.autoCardSync) {
+            cardSyncDirty = true;
+            toast('success', '以后导出角色卡时会自动带上当前合集');
+        } else {
+            toast('info', '不再自动写卡；需要时点「随卡导出」');
+        }
     });
 
     // 图标在 panel 外面（drawer 内），要单独绑。
@@ -2784,10 +2917,16 @@ export async function init() {
         if (!Number.isFinite(Number(settings.aiDepth))) {
             settings.aiDepth = 4;
         }
+        settings.autoCardSync = settings.autoCardSync === true;
         if (!document.getElementById('state-engine-button')) {
             ensureTopBarEntry();
         }
         bindPanelEvents();
+        installCardExportHook();
+        const autoSyncBox = document.getElementById('se-auto-card-sync');
+        if (autoSyncBox) {
+            autoSyncBox.checked = settings.autoCardSync === true;
+        }
         eventSource.on(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
         eventSource.on(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
@@ -2815,6 +2954,10 @@ export async function clean() {
         eventSource?.removeListener?.(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
         eventSource?.removeListener?.(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         clearInjections(ctx, getDecks());
+        if (installCardExportHook.installed && installCardExportHook.originalFetch) {
+            window.fetch = installCardExportHook.originalFetch;
+            installCardExportHook.installed = false;
+        }
         document.getElementById(BUTTON_ID)?.remove();
         delete ctx?.extensionSettings?.[SETTINGS_KEY];
     } catch (error) {
