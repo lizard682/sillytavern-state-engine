@@ -1028,6 +1028,28 @@ function refreshCharacterEditorFirstMes(original) {
     }
 }
 
+/**
+ * 改完 chat[0] 还要刷新界面上那条消息。
+ * 不用 ctx.updateMessageBlock：ST 1.19 里它内部会读 reasoning 元素的属性，
+ * 直接调用会抛 getAttribute 错误，所以这里只替换第一楼正文的文字。
+ */
+function refreshFirstMessageDom(text) {
+    try {
+        let el = document.querySelector('#chat .mes[mesid="0"] .mes_text');
+        if (!el) {
+            // 长聊天会把前几楼折叠起来，这时 mesid="0" 根本不在 DOM 里；
+            // 退一步：找 #chat 下第一条正文以提醒开头的消息替换掉。
+            const first = [...document.querySelectorAll('#chat .mes')].find((node) => isFirstMesWarning(node.querySelector('.mes_text')?.textContent || ''));
+            el = first?.querySelector('.mes_text') || null;
+        }
+        if (el) {
+            el.textContent = text;
+        }
+    } catch (error) {
+        console.warn('[state-engine] 刷新第一条消息显示失败', error);
+    }
+}
+
 /** 如果当前聊天第一条还是安装提醒，把它换成原开局。 */
 async function fixChatFirstMessage(character, original) {
     const ctx = liveContext();
@@ -1041,6 +1063,7 @@ async function fixChatFirstMessage(character, original) {
     } catch (error) {
         console.warn('[state-engine] 保存聊天失败', error);
     }
+    refreshFirstMessageDom(original);
     return true;
 }
 
@@ -1064,6 +1087,7 @@ async function fixWarningChatMessage() {
     } catch (error) {
         console.warn('[state-engine] 保存聊天失败', error);
     }
+    refreshFirstMessageDom(original);
     return true;
 }
 
@@ -1283,6 +1307,8 @@ function refreshInjections() {
     if (seedInitialDecks(store)) {
         saveStore({ immediate: true });
     }
+    // 打开聊天、每轮生成前都顺手检查一次：第一条如果还是安装提醒，就换回原开局。
+    fixWarningChatMessage().catch(() => {});
     // 每次刷新都跟一下游戏内天数：卡自带 MVU 日期就用卡的，没有就用插件自己记的时间。
     tickPluginTime(store, ctx);
     const gameDay = effectiveGameDay(store, ctx);
