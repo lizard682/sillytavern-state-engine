@@ -1436,7 +1436,8 @@ function advanceOnGeneration() {
     if (summoned.length > 0) {
         fired.push(...summoned);
     }
-    if (freshMarkers.length > 0) {
+    // 只有真的抽中了才记住「这一楼处理过标记」，否则一次失败会把这个楼层永久锁死。
+    if (freshMarkers.length > 0 && fired.length > 0) {
         store.state.markerFloor = floor;
     }
 

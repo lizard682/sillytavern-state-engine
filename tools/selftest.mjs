@@ -886,6 +886,26 @@ test('已经出现过、或前置没满足的条目，不会混进「现在可�
     assert.ok(text.includes('还没解锁：第三条 三日'), 'c should be marked locked');
 });
 
+
+test('初始值也会算作「出现过」，后面 requires 它的条目能解锁', () => {
+    const deck = {
+        id: 'init-chain',
+        name: '章节线',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'p1', name: '第一章', weight: 1, initial: true, once: true, requires: [], excludes: [], cooldown: null },
+            { id: 'p2', name: '第二章', weight: 1, once: true, requires: ['init-chain::p1'], excludes: [], cooldown: null },
+        ],
+    };
+    const state = createState('init-chain-seed', 1);
+    applyInitial(state, deck);
+    assert.ok(state.progress.includes('init-chain::p1'), 'initial item should be recorded in progress');
+    const pool = availableItems(state, { ...deck, cooldown: 0 })
+        .map((item) => item.id);
+    assert.ok(pool.includes('p2'), 'p2 should be unlocked after p1 initial');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);

@@ -305,6 +305,8 @@ export function applyInitial(state, deck) {
     ds.initialized = true;
     ds.holdStart = Number(state.turn) || 0;
     ds.used = false;
+    // 初始值也算「出现过」，否则后面 requires 指向它的条目会永远等不到。
+    recordProgress(state, deck.id, initials);
     pushLedger(state, { deck: deck.id, deckName: deck.name, picked: ds.current.slice(), cause: 'init', note: '初始值' });
     return { applied: ds.current.slice(), items: initials };
 }
