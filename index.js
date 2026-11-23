@@ -1131,6 +1131,84 @@ function seedInitialDecks(store) {
     return changed;
 }
 
+/**
+ * 插件自带的时间：卡里没有 MVU 日期时，用它来推进「按天」的清单。
+ * 存在 state.pluginTime 里，不碰卡片的 MVU 变量。
+ */
+const WEATHERS = ['晴', '多云', '阴', '小雨', '雪'];
+
+function ensurePluginTime(store) {
+    if (!store?.state) {
+        return null;
+    }
+    const time = store.state.pluginTime;
+    if (time && typeof time === 'object') {
+        return time;
+    }
+    store.state.pluginTime = { day: 1, clock: '08:00', weather: '晴', advanceEvery: 0, lastTurn: -1 };
+    return store.state.pluginTime;
+}
+
+/** 每过 advanceEvery 个楼层算一天；天气按天轮换。 */
+function tickPluginTime(store, ctx) {
+    const time = ensurePluginTime(store);
+    if (!time) {
+        return;
+    }
+    const every = Math.max(0, Number(time.advanceEvery) || 0);
+    if (every <= 0) {
+        return;
+    }
+    const turn = Number(store.state?.turn) || 0;
+    const last = Number(time.lastTurn);
+    if (!Number.isFinite(last) || last < 0) {
+        time.lastTurn = turn;
+        return;
+    }
+    const delta = Math.floor(turn / every) - Math.floor(last / every);
+    if (delta > 0) {
+        time.day = Math.max(1, Number(time.day) || 1) + delta;
+        time.weather = WEATHERS[(time.day - 1) % WEATHERS.length];
+        time.lastTurn = turn;
+    }
+}
+
+/**
+ * 当前游戏内天数：优先卡自带的 MVU 日期，没有就用插件自己的时间。
+ * 两者都没有时返回 null（按天冷却的合集就退回按楼层）。
+ */
+function effectiveGameDay(store, ctx) {
+    const fromCard = currentGameDay(ctx);
+    if (fromCard !== null) {
+        store.state.timeSource = 'card';
+        return fromCard;
+    }
+    const time = ensurePluginTime(store);
+    if (!time) {
+        return null;
+    }
+    store.state.timeSource = 'plugin';
+    return Math.max(0, Number(time.day) || 1);
+}
+
+function renderTimeBlock(store) {
+    const nowInput = document.getElementById('se-time-now');
+    if (!nowInput) {
+        return;
+    }
+    const time = store?.state ? ensurePluginTime(store) : null;
+    if (!time) {
+        nowInput.value = '';
+        return;
+    }
+    const source = store.state.timeSource === 'card' ? '（由角色卡提供）' : '';
+    nowInput.value = `第 ${time.day} 天 · ${time.clock} · ${time.weather}${source}`;
+    const every = document.querySelector('#state-engine-panel [data-time-field="advanceEvery"]');
+    if (every && document.activeElement !== every) {
+        every.value = String(time.advanceEvery);
+    }
+}
+
 function refreshInjections() {
     const ctx = liveContext();
     const store = getStore();
@@ -1145,8 +1223,9 @@ function refreshInjections() {
     if (seedInitialDecks(store)) {
         saveStore({ immediate: true });
     }
-    // 每次刷新都跟一下游戏内天数（MVU 里有日期才生效），按天冷却的合集靠它。
-    const gameDay = currentGameDay(ctx);
+    // 每次刷新都跟一下游戏内天数：卡自带 MVU 日期就用卡的，没有就用插件自己记的时间。
+    tickPluginTime(store, ctx);
+    const gameDay = effectiveGameDay(store, ctx);
     if (gameDay !== null) {
         store.state.gameDay = gameDay;
     }
@@ -2674,6 +2753,7 @@ function renderPanel() {
     renderSidebar(store);
     renderEditor(store);
     renderGlobalBlock();
+    renderTimeBlock(store);
     updateInjectPreview();
 }
 
@@ -2732,6 +2812,20 @@ function buildPanel() {
                 <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
+                <div class="se-global-block se-time-block">
+                    <div class="se-section-title">游戏内时间 <span class="se-muted">（卡里没有 MVU 日期时，用这里的时间推进「按天」的清单）</span></div>
+                    <div class="se-form">
+                        <label class="se-field">
+                            <span>现在</span>
+                            <input type="text" class="text_pole" id="se-time-now" readonly>
+                        </label>
+                        <label class="se-field">
+                            <span>每几楼过一天（0 = 不自动）</span>
+                            <input type="number" class="text_pole" data-time-field="advanceEvery" min="0" step="1" value="0">
+                        </label>
+                    </div>
+                    <div class="se-hint">卡里带了 MVU 日期时以卡为准，这里的设定不生效；没有日期时改用插件自己的天数。天气按天轮换：晴 / 多云 / 阴 / 小雨 / 雪。</div>
+                </div>
                 <div class="se-global-block">
                     <div class="se-section-title">公共合集库 <span class="se-muted">（存在插件设置里，任何聊天、任何角色卡都能用）</span></div>
                     <div class="se-global-actions">
@@ -3195,6 +3289,19 @@ function bindPanelEvents() {
 
     root.addEventListener('change', (event) => {
         const target = event.target;
+        if (target?.dataset?.timeField) {
+            const store = getStore({ create: false });
+            if (store) {
+                const time = ensurePluginTime(store);
+                if (target.dataset.timeField === 'advanceEvery') {
+                    time.advanceEvery = Math.max(0, Number(target.value) || 0);
+                    time.lastTurn = Number(store.state?.turn) || 0;
+                    saveStore({ immediate: false });
+                    renderTimeBlock(store);
+                }
+            }
+            return;
+        }
         const deckId = selectedDeckId;
         if (!deckId || !deckById(deckId)) {
             return;
