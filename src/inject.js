@@ -97,8 +97,11 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
     const endable = decks.filter((deck) => deck.enabled !== false
         && deck.hold?.mode === 'ai'
         && deck.trigger?.ai !== true);
+    const lockName = String(contextInfo.lockName || '').trim();
     if (usable.length === 0 && endable.length === 0) {
-        return '';
+        return lockName
+            ? `现在「${lockName}」开着不可打断，其它清单暂时休眠；等它抽无可抽，再申请调别的。`
+            : '';
     }
 
     const nameOf = (deckId, itemId) => {
@@ -185,8 +188,11 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
         const tail = parts.join('\n  ');
         return `- ${deck.name}｜申请时写这串：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
     });
+    const lockLine = lockName
+        ? `现在「${lockName}」开着不可打断，只处理它；其它清单暂时休眠，等它抽无可抽再说。\n`
+        : '';
     const body = usable.length > 0
-        ? (template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', lines.join('\n'))
+        ? lockLine + (template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', lines.join('\n'))
         : '';
     if (endable.length === 0) {
         return body;

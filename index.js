@@ -1143,7 +1143,13 @@ function refreshInjections() {
         }
     }
     // 导演提示只列此刻真的会生效的合集：绑定角色不在场、或只能被上级抽中的子合集，都别让模型白申请。
-    const directorDecks = store.decks.filter((deck) => deck.enabled !== false && deck.onlyFromParent !== true && deck.summon?.only !== true && bindingActive(deck, ctx));
+    // 不可打断生效时，干脆只把锁定合集交给模型，免得它去申请一堆抽不到的清单。
+    const lockDeck = activeLockDeck(store.state, store.decks);
+    const directorDecks = store.decks.filter((deck) => deck.enabled !== false
+        && deck.onlyFromParent !== true
+        && deck.summon?.only !== true
+        && bindingActive(deck, ctx)
+        && (!lockDeck || deck.id === lockDeck.id));
     const itemsByDeck = Object.fromEntries(store.decks.map((deck) => [deck.id, Array.isArray(deck.items) ? deck.items : []]));
     // 告诉模型「每份清单现在停在哪一条、后面还有哪些」——嵌套剧情线时它才知道下一幕是什么。
     const currentByDeck = Object.fromEntries(store.decks.map((deck) => {
@@ -1154,6 +1160,7 @@ function refreshInjections() {
         currentByDeck,
         done: doneSet(store.state),
         state: store.state,
+        lockName: lockDeck ? lockDeck.name : '',
     });
     const aiDepth = Math.max(0, Number(settings.aiDepth) || 4);
     ctx.setExtensionPrompt(DIRECTOR_KEY, director, PROMPT_POSITION.chat, aiDepth, false, PROMPT_ROLE.system);
