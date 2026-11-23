@@ -87,6 +87,7 @@ let itemsShown = ITEMS_PAGE_SIZE;
 let itemsDeckId = '';
 // 用户手动关掉「卡里带了合集」提示条后，记住是哪张卡、多少个，避免一直弹。
 let cardHintDismissed = '';
+let lastPromptedAvatar = '';
 
 // ---------------------------------------------------------------------------
 // 基础工具
@@ -2870,6 +2871,7 @@ function buildPanel() {
                 <div class="se-hint">勾上顶栏的「随卡导出」后，导出角色卡时会自动带上绑定到这张卡的合集（以及和它们有关联的合集）；导出完成会把本地卡的开场白恢复原样。</div>
                 <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
+                <button type="button" class="menu_button" data-action="import-card-decks" title="把这张角色卡里带着的合集补进当前聊天（已存在的同名合集不会被覆盖）">从角色卡导入合集</button>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
                 <div class="se-global-block se-time-block">
                     <div class="se-section-title">游戏内时间 <span class="se-muted">（卡里没有 MVU 日期时，用这里的时间推进「按天」的清单）</span></div>
@@ -3021,7 +3023,13 @@ async function maybeShowCardImportPopup() {
         return;
     }
     const character = currentCharacterCard();
-    const key = `${character?.avatar || ''}:${pending.length}`;
+    const avatar = character?.avatar || '';
+    // 每张角色卡只问一次（记在插件设置里，刷新、开新聊天都不再重复问）。
+    const asked = settings.cardImportAsked && typeof settings.cardImportAsked === 'object' ? settings.cardImportAsked : {};
+    if (!avatar || asked[avatar] === true) {
+        return;
+    }
+    const key = `${avatar}:${pending.length}`;
     if (key === cardHintDismissed || key === cardImportPopupKey) {
         return;
     }
@@ -3053,10 +3061,19 @@ async function maybeShowCardImportPopup() {
             } else {
                 cardHintDismissed = key;
             }
+            asked[avatar] = true;
+            settings.cardImportAsked = asked;
+            saveSettings();
         } else if (window.confirm(`${title}\n\n${body.replace(/<br\s*\/?>/g, '\n').replace(/<\/?[^>]+>/g, '')}`)) {
             importCardDecks();
+            asked[avatar] = true;
+            settings.cardImportAsked = asked;
+            saveSettings();
         } else {
             cardHintDismissed = key;
+            asked[avatar] = true;
+            settings.cardImportAsked = asked;
+            saveSettings();
         }
     } catch (error) {
         console.warn('[state-engine] 导入提示弹窗失败', error);
@@ -3480,11 +3497,15 @@ function onChatChanged() {
                 console.warn('[state-engine] chat changed retry 2 failed', error);
             }
         }, 400);
-        // 只有「这个聊天还是空的」才会问一次要不要导入角色卡自带的合集；
-        // 放在切换聊天之后，而不是每次面板重绘都检查，避免每开一次聊天弹一次。
+        // 只在「切到一张还没问过的角色卡」时问一次要不要导入角色卡自带的合集。
+        // 同一张卡开新聊天不会再弹，避免拿卡里的旧快照覆盖聊天内容。
         setTimeout(() => {
             try {
-                renderCardHint();
+                const avatar = currentCharacterCard()?.avatar || '';
+                if (avatar && avatar !== lastPromptedAvatar) {
+                    lastPromptedAvatar = avatar;
+                    renderCardHint();
+                }
             } catch (error) {
                 console.warn('[state-engine] card hint failed', error);
             }
