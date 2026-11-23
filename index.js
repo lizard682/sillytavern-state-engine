@@ -33,6 +33,7 @@ import {
     validatePack,
 } from './src/pack.js';
 import {
+    applyInitial,
     clearDeckHistory,
     clearCurrent,
     clearProgress,
@@ -200,6 +201,7 @@ function normalizeDeckShape(deck) {
                 item.excludes = normalizeExcludes(item.excludes);
             }
             item.excludeSiblings = item.excludeSiblings === true;
+            item.initial = item.initial === true;
             const ownCooldown = Number(item.cooldown);
             item.cooldown = Number.isFinite(ownCooldown) && item.cooldown !== null && item.cooldown !== '' ? Math.max(0, Math.floor(ownCooldown)) : null;
             delete item.situation;
@@ -1091,6 +1093,27 @@ function bindingActive(deck, ctx, extraText = '') {
     return `${recent}\n${extraText}`.includes(binding.name);
 }
 
+/**
+ * 新聊天第一次打开时，把勾了「作为初始值」的条目直接生效。
+ * 返回 true 表示这次改动了数据，调用方负责保存。
+ */
+function seedInitialDecks(store) {
+    if (!store) {
+        return false;
+    }
+    let changed = false;
+    for (const deck of store.decks) {
+        if (deck.enabled === false) {
+            continue;
+        }
+        const { applied } = applyInitial(store.state, deck);
+        if (applied.length > 0) {
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 function refreshInjections() {
     const ctx = liveContext();
     const store = getStore();
@@ -1101,6 +1124,9 @@ function refreshInjections() {
         clearInjections(ctx, store?.decks || []);
         updateInjectPreview();
         return;
+    }
+    if (seedInitialDecks(store)) {
+        saveStore({ immediate: true });
     }
     for (const deck of store.decks) {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
@@ -1699,7 +1725,9 @@ function setItemField(deckId, itemId, field, value) {
         ? Math.max(0, Number(value) || 0)
         : field === 'once'
             ? value === true || value === 'true'
-            : field === 'excludeSiblings'
+            : field === 'initial'
+                ? value === true || value === 'true'
+                : field === 'excludeSiblings'
                 ? value === true || value === 'true'
                 : field === 'cooldown'
                     ? (String(value ?? '').trim() === '' ? null : Math.max(0, Math.floor(Number(value) || 0)))
@@ -2143,6 +2171,7 @@ function renderItems(deck, store) {
         const flags = [
             used ? '已出现' : '',
             item.once ? '一次性' : '',
+            item.initial ? '初始' : '',
             needCount ? `前置 ${needCount}` : '',
             avoidCount ? `互斥 ${avoidCount}` : '',
         ].filter(Boolean).join(' · ');
@@ -2159,6 +2188,10 @@ function renderItems(deck, store) {
                 <label class="se-check se-check-wide">
                     <input type="checkbox" data-item-field="once" ${item.once ? 'checked' : ''}>
                     <span>只出现一次（抽中后不再进候选池）</span>
+                </label>
+                <label class="se-check se-check-wide">
+                    <input type="checkbox" data-item-field="initial" ${item.initial ? 'checked' : ''}>
+                    <span>作为初始值（新聊天第一次打开时直接选中，不用先抽）</span>
                 </label>
                 <label class="se-check se-check-wide">
                     <input type="checkbox" data-item-field="excludeSiblings" ${item.excludeSiblings ? 'checked' : ''}>

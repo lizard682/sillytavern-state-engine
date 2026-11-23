@@ -257,7 +257,7 @@ export function normalizeExcludes(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -275,6 +275,8 @@ export function normalizeItem(raw, index = 0) {
         weight: Number.isFinite(Number(raw.weight)) ? Math.max(0, Number(raw.weight)) : 1,
         // 只出现一次：抽中后写进进度，之后不再进候选池。
         once: raw.once === true,
+        // 初始值：新聊天第一次打开时直接采用这条，不需要先抽。
+        initial: raw.initial === true,
         // 前置条件：这些条目都「已经出现过」才轮得到它。
         requires: normalizeRequires(raw.requires),
         // 排除条件：这些条目里只要有一条出现过，这条就不进池。
@@ -386,6 +388,7 @@ export function serializePack(pack) {
             text: item.text,
             weight: item.weight ?? 1,
             ...(item.once ? { once: true } : {}),
+            ...(item.initial ? { initial: true } : {}),
             ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
             ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
             ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),

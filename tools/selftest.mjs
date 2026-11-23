@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 
 let passed = 0;
@@ -773,6 +773,56 @@ test('条目冷却：留空时不额外限制，跟合集设置走', () => {
     }
     assert.ok(seen.has('x') || seen.has('y'));
     assert.equal(deckState(state, 'item-cd-2').itemTurns.x !== undefined || deckState(state, 'item-cd-2').itemTurns.y !== undefined, true);
+});
+
+
+section('初始值');
+test('勾了初始值的条目会在新聊天里直接生效', () => {
+    const deck = {
+        id: 'init-a',
+        name: '初始柜',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1, initial: true },
+            { id: 'b', name: 'B', text: 'B', weight: 1, initial: false },
+        ],
+    };
+    const state = createState('init-seed', 1);
+    const { applied } = applyInitial(state, deck);
+    assert.deepEqual(applied, ['a']);
+    assert.deepEqual(deckState(state, 'init-a').current, ['a']);
+    assert.equal(state.ledger[state.ledger.length - 1].cause, 'init');
+});
+
+test('初始值只应用一次，清空后也不会自己回来', () => {
+    const deck = {
+        id: 'init-b',
+        name: '初始柜二',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1, initial: true }],
+    };
+    const state = createState('init-seed-2', 1);
+    applyInitial(state, deck);
+    deckState(state, 'init-b').current = [];
+    const again = applyInitial(state, deck);
+    assert.deepEqual(again.applied, []);
+    assert.deepEqual(deckState(state, 'init-b').current, []);
+});
+
+test('没有初始值的合集保持空', () => {
+    const deck = {
+        id: 'init-c',
+        name: '没有初始',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1 }],
+    };
+    const state = createState('init-seed-3', 1);
+    const { applied } = applyInitial(state, deck);
+    assert.deepEqual(applied, []);
+    assert.deepEqual(deckState(state, 'init-c').current, []);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

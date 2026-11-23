@@ -284,6 +284,31 @@ export function applyCompose(state, decks, deck, result) {
 }
 
 /** 手动重抽：nonce+1，让随机流换一条。 */
+/**
+ * 初始值：合集里勾了「作为初始值」的条目，在新聊天第一次打开时直接生效，
+ * 不需要先抽。只跑一次（ds.initialized 记住），清空或新开聊天才会重来。
+ */
+export function applyInitial(state, deck) {
+    const ds = deckState(state, deck.id);
+    if (ds.initialized === true) {
+        return { applied: [] };
+    }
+    if (Array.isArray(ds.current) && ds.current.length > 0) {
+        ds.initialized = true;
+        return { applied: [] };
+    }
+    const initials = (deck.items || []).filter((item) => item.initial === true);
+    if (initials.length === 0) {
+        return { applied: [] };
+    }
+    ds.current = initials.map((item) => item.id);
+    ds.initialized = true;
+    ds.holdStart = Number(state.turn) || 0;
+    ds.used = false;
+    pushLedger(state, { deck: deck.id, deckName: deck.name, picked: ds.current.slice(), cause: 'init', note: '初始值' });
+    return { applied: ds.current.slice(), items: initials };
+}
+
 export function bumpNonce(state, deckId) {    const ds = deckState(state, deckId);
     ds.nonce = (Number(ds.nonce) || 0) + 1;
     return ds.nonce;
