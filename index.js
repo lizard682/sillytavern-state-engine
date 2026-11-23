@@ -1132,49 +1132,105 @@ function seedInitialDecks(store) {
 }
 
 /**
+ * 插件在 MVU 变量里注册的时间字段（stat_data 下），变量管理器里能直接看到、能改。
+ * 卡自己已经有日期时不动它；没有才写这块。
+ */
+const MVU_TIME_KEY = '状态引擎时间';
+
+function mvuRoot(ctx) {
+    const md = ctx?.chatMetadata;
+    if (!md) {
+        return null;
+    }
+    if (!md.variables || typeof md.variables !== 'object') {
+        md.variables = {};
+    }
+    if (!md.variables.stat_data || typeof md.variables.stat_data !== 'object') {
+        md.variables.stat_data = {};
+    }
+    return md.variables.stat_data;
+}
+
+/** 读（必要时创建）插件在 MVU 里的时间字段。 */
+function ensureMvuTime(ctx) {
+    const root = mvuRoot(ctx);
+    if (!root) {
+        return null;
+    }
+    const existing = root[MVU_TIME_KEY];
+    if (existing && typeof existing === 'object') {
+        if (!existing.日期) existing.日期 = '第1天';
+        if (!existing.时间) existing.时间 = '08:00';
+        if (!existing.天气) existing.天气 = '晴';
+        return existing;
+    }
+    const seed = { 日期: '第1天', 时间: '08:00', 天气: '晴' };
+    root[MVU_TIME_KEY] = seed;
+    return seed;
+}
+
+/** 「第12天」→ 12；认不出返回 null。 */
+function parsePluginDay(text) {
+    const match = String(text || '').match(/第\s*(\d{1,6})\s*天/);
+    return match ? Number(match[1]) : null;
+}
+
+/**
  * 插件自带的时间：卡里没有 MVU 日期时，用它来推进「按天」的清单。
- * 存在 state.pluginTime 里，不碰卡片的 MVU 变量。
+ * 写进 MVU 变量（stat_data.状态引擎时间），变量管理器里能看到。
  */
 const WEATHERS = ['晴', '多云', '阴', '小雨', '雪'];
 
-function ensurePluginTime(store) {
-    if (!store?.state) {
+function ensurePluginTime(store, ctx) {
+    const time = ensureMvuTime(ctx || liveContext());
+    if (!time) {
         return null;
     }
-    const time = store.state.pluginTime;
-    if (time && typeof time === 'object') {
+    if (!store?.state) {
         return time;
     }
-    store.state.pluginTime = { day: 1, clock: '08:00', weather: '晴', advanceEvery: 0, lastTurn: -1 };
-    return store.state.pluginTime;
+    // 把「每几楼过一天」这类插件配置放在 state 里，变量本身放在 MVU 里。
+    const config = store.state.timeConfig && typeof store.state.timeConfig === 'object' ? store.state.timeConfig : {};
+    if (!Number.isFinite(Number(config.advanceEvery))) {
+        config.advanceEvery = 0;
+    }
+    if (!Number.isFinite(Number(config.lastTurn))) {
+        config.lastTurn = -1;
+    }
+    store.state.timeConfig = config;
+    return time;
 }
 
-/** 每过 advanceEvery 个楼层算一天；天气按天轮换。 */
+/** 每过 advanceEvery 个楼层算一天；天气按天轮换。推进结果写回 MVU 变量。 */
 function tickPluginTime(store, ctx) {
-    const time = ensurePluginTime(store);
-    if (!time) {
+    const time = ensurePluginTime(store, ctx);
+    const config = store?.state?.timeConfig;
+    if (!time || !config) {
         return;
     }
-    const every = Math.max(0, Number(time.advanceEvery) || 0);
+    const every = Math.max(0, Number(config.advanceEvery) || 0);
     if (every <= 0) {
         return;
     }
     const turn = Number(store.state?.turn) || 0;
-    const last = Number(time.lastTurn);
+    const last = Number(config.lastTurn);
     if (!Number.isFinite(last) || last < 0) {
-        time.lastTurn = turn;
+        config.lastTurn = turn;
         return;
     }
     const delta = Math.floor(turn / every) - Math.floor(last / every);
     if (delta > 0) {
-        time.day = Math.max(1, Number(time.day) || 1) + delta;
-        time.weather = WEATHERS[(time.day - 1) % WEATHERS.length];
-        time.lastTurn = turn;
+        const current = parsePluginDay(time.日期) ?? 1;
+        const next = Math.max(1, current) + delta;
+        time.日期 = `第${next}天`;
+        time.天气 = WEATHERS[(next - 1) % WEATHERS.length];
+        config.lastTurn = turn;
+        ctx?.saveMetadataDebounced?.();
     }
 }
 
 /**
- * 当前游戏内天数：优先卡自带的 MVU 日期，没有就用插件自己的时间。
+ * 当前游戏内天数：优先卡自带的 MVU 日期，没有就用插件在 MVU 里注册的时间。
  * 两者都没有时返回 null（按天冷却的合集就退回按楼层）。
  */
 function effectiveGameDay(store, ctx) {
@@ -1183,12 +1239,13 @@ function effectiveGameDay(store, ctx) {
         store.state.timeSource = 'card';
         return fromCard;
     }
-    const time = ensurePluginTime(store);
+    const time = ensurePluginTime(store, ctx);
     if (!time) {
         return null;
     }
     store.state.timeSource = 'plugin';
-    return Math.max(0, Number(time.day) || 1);
+    const day = parsePluginDay(time.日期);
+    return day !== null ? day : 1;
 }
 
 function renderTimeBlock(store) {
@@ -1196,16 +1253,18 @@ function renderTimeBlock(store) {
     if (!nowInput) {
         return;
     }
-    const time = store?.state ? ensurePluginTime(store) : null;
+    const ctx = liveContext();
+    const time = ensureMvuTime(ctx);
     if (!time) {
         nowInput.value = '';
         return;
     }
-    const source = store.state.timeSource === 'card' ? '（由角色卡提供）' : '';
-    nowInput.value = `第 ${time.day} 天 · ${time.clock} · ${time.weather}${source}`;
+    const source = store?.state?.timeSource === 'card' ? '（由角色卡提供）' : '';
+    nowInput.value = `${time.日期} · ${time.时间} · ${time.天气}${source}`;
     const every = document.querySelector('#state-engine-panel [data-time-field="advanceEvery"]');
+    const config = store?.state?.timeConfig || {};
     if (every && document.activeElement !== every) {
-        every.value = String(time.advanceEvery);
+        every.value = String(Math.max(0, Number(config.advanceEvery) || 0));
     }
 }
 
@@ -3292,10 +3351,11 @@ function bindPanelEvents() {
         if (target?.dataset?.timeField) {
             const store = getStore({ create: false });
             if (store) {
-                const time = ensurePluginTime(store);
+                const config = store.state.timeConfig && typeof store.state.timeConfig === 'object' ? store.state.timeConfig : {};
                 if (target.dataset.timeField === 'advanceEvery') {
-                    time.advanceEvery = Math.max(0, Number(target.value) || 0);
-                    time.lastTurn = Number(store.state?.turn) || 0;
+                    config.advanceEvery = Math.max(0, Number(target.value) || 0);
+                    config.lastTurn = Number(store.state?.turn) || 0;
+                    store.state.timeConfig = config;
                     saveStore({ immediate: false });
                     renderTimeBlock(store);
                 }
