@@ -3132,7 +3132,7 @@ async function maybeShowCardImportPopup() {
     if (cardImportPopupOpen) {
         return;
     }
-    // 只在「这个聊天还是空的」时问一次；已经有合集的聊天绝不弹，避免拿卡里的旧快照覆盖。
+    // 只在「这个聊天还是空的」时补一次；已经有合集的聊天绝不动，避免拿卡里的旧快照覆盖。
     const current = getStore();
     if (current && Array.isArray(current.decks) && current.decks.length > 0) {
         return;
@@ -3141,61 +3141,12 @@ async function maybeShowCardImportPopup() {
     if (pending.length === 0) {
         return;
     }
-    const character = currentCharacterCard();
-    const avatar = character?.avatar || '';
-    // 每张角色卡只问一次（记在插件设置里，刷新、开新聊天都不再重复问）。
-    const asked = settings.cardImportAsked && typeof settings.cardImportAsked === 'object' ? settings.cardImportAsked : {};
-    if (!avatar || asked[avatar] === true) {
-        return;
-    }
-    const key = `${avatar}:${pending.length}`;
-    if (key === cardHintDismissed || key === cardImportPopupKey) {
-        return;
-    }
+    // 新聊天开出来是空的，直接从角色卡把合集带进来（不再弹窗问，问一次就烦一次）。
     cardImportPopupOpen = true;
-    cardImportPopupKey = key;
-    const names = pending.map((deck) => deck.name || deck.id).join('、');
-    const savedAt = Number(character?.data?.extensions?.[CARD_EXT_KEY]?.savedAt) || 0;
-    const savedText = savedAt ? `（这份是 ${new Date(savedAt).toLocaleString()} 存的，不是你聊天里最新的版本）` : '';
-    const title = `这张卡自带了 ${pending.length} 个合集`;
-    const body = `「${escapeHtml(character?.name || '这张卡')}」里带着：${escapeHtml(names)}。${savedText}<br><br>要导进这个新聊天吗？导入会新增这些合集；已经存在的同名合集不会被覆盖。`;
     try {
-        let PopupCtor = globalThis.Popup;
-        let kind = globalThis.POPUP_TYPE?.CONFIRM;
-        if (typeof PopupCtor !== 'function') {
-            // 酒馆把弹窗组件放在 /scripts/popup.js，没有挂到全局。
-            const popupModule = await import('/scripts/popup.js');
-            PopupCtor = popupModule.Popup;
-            kind = popupModule.POPUP_TYPE?.CONFIRM;
-        }
-        if (typeof PopupCtor === 'function' && kind !== undefined) {
-            const popup = new PopupCtor(body, kind, '', {
-                okButton: '导入',
-                cancelButton: '先不用',
-                wide: false,
-            });
-            const confirmed = await popup.show();
-            if (confirmed) {
-                importCardDecks();
-            } else {
-                cardHintDismissed = key;
-            }
-            asked[avatar] = true;
-            settings.cardImportAsked = asked;
-            saveSettings();
-        } else if (window.confirm(`${title}\n\n${body.replace(/<br\s*\/?>/g, '\n').replace(/<\/?[^>]+>/g, '')}`)) {
-            importCardDecks();
-            asked[avatar] = true;
-            settings.cardImportAsked = asked;
-            saveSettings();
-        } else {
-            cardHintDismissed = key;
-            asked[avatar] = true;
-            settings.cardImportAsked = asked;
-            saveSettings();
-        }
+        importCardDecks();
     } catch (error) {
-        console.warn('[state-engine] 导入提示弹窗失败', error);
+        console.warn('[state-engine] 自动带上角色卡的合集失败', error);
     } finally {
         cardImportPopupOpen = false;
     }
@@ -3607,19 +3558,15 @@ function onChatChanged() {
                 console.warn('[state-engine] chat changed retry 2 failed', error);
             }
         }, 400);
-        // 只在「切到一张还没问过的角色卡」时问一次要不要导入角色卡自带的合集。
-        // 同一张卡开新聊天不会再弹，避免拿卡里的旧快照覆盖聊天内容。
+        // 新聊天开出来是空的：如果这张卡自带合集，就自动带进来（不再弹窗问）。
+        // 已经有合集的聊天绝不动，避免拿卡里的旧快照覆盖聊天内容。
         setTimeout(() => {
             try {
-                const avatar = currentCharacterCard()?.avatar || '';
-                if (avatar && avatar !== lastPromptedAvatar) {
-                    lastPromptedAvatar = avatar;
-                    renderCardHint();
-                }
+                renderCardHint();
             } catch (error) {
                 console.warn('[state-engine] card hint failed', error);
             }
-        }, 1200);
+        }, 900);
         // 装了插件的人打开带提醒的卡：立刻换回作者写的开场白，
         // 不等轮询、也不等用户刷新页面。恢复是幂等的，guard 删掉之后就不会再跑。
         restoreSelectedCharacterFirstMes();
