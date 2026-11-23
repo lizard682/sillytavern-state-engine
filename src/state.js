@@ -460,8 +460,10 @@ export function clearDeckHistory(state, deckId) {
 
 /**
  * 手动撤销这一抽：把当前合集抽中的内容清空，让它回到「还没抽」的状态。
- * 冷却记录（recent）保留不动；它们被记进「已出现」的那一笔也一起撤回，
- * 这样误抽一次性/关键条目之后还能重新抽到。
+ *
+ * 只动「当前选中」这一个状态：current / holdStart / used。
+ * 不动「已出现」记录（progress）——一次性、前置、排除引用的都是「这条出现过没有」，
+ * 清除之后这些记录仍然有效；冷却记录（recent）也保留。
  */
 export function clearCurrent(state, deck) {
     if (!deck?.id) {
@@ -472,17 +474,13 @@ export function clearCurrent(state, deck) {
     ds.current = [];
     ds.holdStart = -1;
     ds.used = false;
-    if (removed.length > 0 && Array.isArray(state.progress)) {
-        const refs = new Set(removed.map((id) => itemRef(deck.id, id)));
-        state.progress = state.progress.filter((ref) => !refs.has(ref));
-    }
     if (removed.length > 0) {
         pushLedger(state, {
             deck: deck.id,
             deckName: deck.name,
             cause: 'cleared',
             picked: removed,
-            note: '手动清除',
+            note: '手动清除（不动「已出现」记录与冷却）',
         });
     }
     return { removed };

@@ -2320,7 +2320,7 @@ function buildPanel() {
 
             <div class="se-takebar">
                 <span id="se-take-preview" class="se-take-preview"></span>
-                <button type="button" class="menu_button se-clear-btn" data-action="clear-current" title="把当前合集抽中的内容清空，回到没抽的状态">清除</button>
+                <button type="button" class="menu_button se-clear-btn" data-action="clear-current" title="只清空当前抽中的内容；条目的「已出现」记录和冷却都不重置">清除</button>
                 <button type="button" class="menu_button se-take-btn" data-action="draw">抽一条 <kbd>空格</kbd></button>
             </div>
 
@@ -2714,7 +2714,7 @@ function bindPanelEvents() {
                 refreshInjections();
                 renderPanel();
                 toast(removed.length > 0 ? 'success' : 'info', removed.length > 0
-                    ? `已清除「${deck.name || deck.id}」抽中的 ${removed.length} 条`
+                    ? `已清空「${deck.name || deck.id}」当前抽中的内容（条目状态不变）`
                     : `「${deck.name || deck.id}」现在没有抽中的内容`);
             }
         } else if (action === 'export-deck') {
