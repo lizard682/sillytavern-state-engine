@@ -29,11 +29,13 @@ import {
     normalizeKeywords,
     normalizeRequires,
     normalizeExcludes,
+    normalizeTimeUnit,
     serializePack,
     validatePack,
 } from './src/pack.js';
 import {
     applyInitial,
+    captureFrame,
     clearDeckHistory,
     clearCurrent,
     clearProgress,
@@ -45,6 +47,7 @@ import {
     drawDeckTree,
     activeLockDeck,
     availableItems,
+    currentGameDay,
     deckExhausted,
     endHold,
     expireIfDue,
@@ -157,6 +160,7 @@ function normalizeDeckShape(deck) {
         deck.summon.only = deck.summon.only === true;
     }
     deck.lock = deck.lock === true;
+    deck.timeUnit = normalizeTimeUnit(deck.timeUnit);
     deck.compose = Array.isArray(deck.compose)
         ? [...new Set(deck.compose.filter((id) => typeof id === 'string' && id))]
         : [];
@@ -272,6 +276,15 @@ function getStore({ create = false } = {}) {
 function saveStore({ immediate = false } = {}) {
     cardSyncDirty = true;
     const ctx = liveContext();
+    // 每次落盘前给当前楼层拍一张快照，删楼 / 重生成 / 切分支时才能跟着回退。
+    const store = getStore({ create: false });
+    if (store?.state) {
+        try {
+            captureFrame(store.state);
+        } catch (error) {
+            console.warn('[state-engine] snapshot failed', error);
+        }
+    }
     if (immediate) {
         ctx?.saveMetadata?.();
     } else {
@@ -1131,6 +1144,11 @@ function refreshInjections() {
     }
     if (seedInitialDecks(store)) {
         saveStore({ immediate: true });
+    }
+    // 每次刷新都跟一下游戏内天数（MVU 里有日期才生效），按天冷却的合集靠它。
+    const gameDay = currentGameDay(ctx);
+    if (gameDay !== null) {
+        store.state.gameDay = gameDay;
     }
     for (const deck of store.decks) {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
@@ -2463,6 +2481,13 @@ function renderEditor(store) {
                 <span>冷却轮数</span>
                 <input type="number" class="text_pole" data-deck-field="cooldown" min="0" step="1" value="${cooldown}">
             </label>
+            <label class="se-field">
+                <span>按什么算冷却</span>
+                <select class="text_pole" data-deck-field="timeUnit">
+                    <option value="turn" ${deck.timeUnit === 'day' ? '' : 'selected'}>按楼层</option>
+                    <option value="day" ${deck.timeUnit === 'day' ? 'selected' : ''}>按游戏内天数（读 MVU 日期）</option>
+                </select>
+            </label>
         </div>
         <div class="se-form se-nest-row" ${deck.parent ? '' : 'hidden'}>
             <label class="se-field">
@@ -3375,6 +3400,27 @@ function onMessageReceived() {
 }
 
 /**
+ * 删楼之后把状态跟回去：楼层变短了，就去最近的那张快照。
+ */
+function onMessageDeleted() {
+    setTimeout(() => {
+        try {
+            const store = getStore({ create: false });
+            if (!store || !store.state) {
+                return;
+            }
+            const ctx = liveContext();
+            syncTurn(store.state, ctx?.chat?.length ?? 0);
+            saveStore({ immediate: true });
+            refreshInjections();
+            refreshPanelLight();
+        } catch (error) {
+            console.warn('[state-engine] rollback failed', error);
+        }
+    }, 120);
+}
+
+/**
  * 只处理上一楼 AI 消息里的申请标记（不含楼层自动、关键词）。
  * 返回真正抽中的合集数。
  */
@@ -3458,6 +3504,8 @@ export async function init() {
         eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
         // 消息一落地就认标记，别等下一轮生成开头：那样会白白浪费一整轮。
         eventSource.on(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
+        // 删楼 / 切分支要把状态跟回去。
+        eventSource.on(eventTypes.MESSAGE_DELETED, onMessageDeleted);
         eventSource.on(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
         eventSource.on(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         renderPanel();
@@ -3481,6 +3529,7 @@ export async function clean() {
         eventSource?.removeListener?.(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource?.removeListener?.(eventTypes.GENERATION_STARTED, onGenerationStarted);
         eventSource?.removeListener?.(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
+        eventSource?.removeListener?.(eventTypes.MESSAGE_DELETED, onMessageDeleted);
         eventSource?.removeListener?.(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
         eventSource?.removeListener?.(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         clearInjections(ctx, getDecks());

@@ -208,6 +208,13 @@ function normalizeCompose(raw) {
     return [...new Set(raw.map((id) => asString(id)).filter((id) => SUMMON_ID_RE.test(id) && !RESERVED_IDS.has(id)))];
 }
 
+/** 冷却单位：按楼层（默认）或按游戏内天数（读 MVU 变量里的日期）。 */
+export const TIME_UNITS = ['turn', 'day'];
+
+export function normalizeTimeUnit(raw) {
+    return TIME_UNITS.includes(raw) ? raw : 'turn';
+}
+
 function normalizeNesting(raw) {
     const n = isPlainObject(raw) ? raw : {};
     const parent = asString(n.parent);
@@ -354,6 +361,7 @@ export function validatePack(raw) {
             hold: normalizeHold(raw.hold),
             inject: normalizeInject(raw.inject),
             cooldown: asInt(raw.cooldown, 2, 0),
+            timeUnit: normalizeTimeUnit(raw.timeUnit),
             pick: asInt(raw.pick, 1, 1),
             lock: raw.lock === true,
             aiPrompt: asString(raw.aiPrompt),
@@ -379,6 +387,7 @@ export function serializePack(pack) {
         hold: normalizeHold(pack.hold),
         inject: normalizeInject(pack.inject),
         cooldown: asInt(pack.cooldown, 2, 0),
+        ...(normalizeTimeUnit(pack.timeUnit) === 'day' ? { timeUnit: 'day' } : {}),
         pick: asInt(pack.pick, 1, 1),
         ...(pack.lock === true ? { lock: true } : {}),
         aiPrompt: asString(pack.aiPrompt),

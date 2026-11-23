@@ -23,8 +23,76 @@ export function createState(seed, startTurn = 0) {
         // 全局进度：记录「哪些条目已经出现过」（合集id::条目id），
         // 供「只出现一次」和「前置条件」使用，跨合集共享。
         progress: [],
+        // 每层一份快照：删楼 / 重生成 / 切分支时按楼层回退。
+        frames: {},
         ledger: [],
     };
+}
+
+/**
+ * 给当前楼层拍一张快照。
+ * 只记会随抽签变化的字段，别把整份状态抄一遍。
+ */
+export function captureFrame(state) {
+    if (!state.frames || typeof state.frames !== 'object') {
+        state.frames = {};
+    }
+    const turn = Number(state.turn) || 0;
+    const decks = {};
+    for (const [id, ds] of Object.entries(state.decks || {})) {
+        decks[id] = {
+            current: Array.isArray(ds?.current) ? [...ds.current] : [],
+            used: ds?.used === true,
+            holdStart: Number.isFinite(Number(ds?.holdStart)) ? Number(ds.holdStart) : -1,
+            itemTurns: { ...(ds?.itemTurns || {}) },
+            gameDay: Number.isFinite(Number(ds?.gameDay)) ? Number(ds.gameDay) : null,
+        };
+    }
+    state.frames[turn] = {
+        decks,
+        progress: Array.isArray(state.progress) ? [...state.progress] : [],
+        markerFloor: Number.isFinite(Number(state.markerFloor)) ? Number(state.markerFloor) : -1,
+    };
+    // 只保留最近 200 层，别让快照无限长。
+    const keys = Object.keys(state.frames).map(Number).sort((a, b) => a - b);
+    if (keys.length > 200) {
+        for (const key of keys.slice(0, keys.length - 200)) {
+            delete state.frames[key];
+        }
+    }
+}
+
+/**
+ * 回退到某一层：找不晚于 targetTurn 的最近快照，把 current / 进度 / 标记楼层复原。
+ * 返回是否真的恢复过。
+ */
+export function restoreFrame(state, targetTurn) {
+    const frames = state.frames || {};
+    const keys = Object.keys(frames)
+        .map(Number)
+        .filter((key) => key <= targetTurn)
+        .sort((a, b) => a - b);
+    if (keys.length === 0) {
+        return false;
+    }
+    const frame = frames[keys[keys.length - 1]];
+    for (const [id, snap] of Object.entries(frame.decks || {})) {
+        const ds = deckState(state, id);
+        ds.current = Array.isArray(snap.current) ? [...snap.current] : [];
+        ds.used = snap.used === true;
+        ds.holdStart = Number.isFinite(Number(snap.holdStart)) ? Number(snap.holdStart) : -1;
+        ds.itemTurns = { ...(snap.itemTurns || {}) };
+        ds.gameDay = Number.isFinite(Number(snap.gameDay)) ? Number(snap.gameDay) : null;
+    }
+    state.progress = Array.isArray(frame.progress) ? [...frame.progress] : [];
+    state.markerFloor = Number.isFinite(Number(frame.markerFloor)) ? Number(frame.markerFloor) : -1;
+    // 比目标楼层更晚的快照不再有意义。
+    for (const key of Object.keys(frames)) {
+        if (Number(key) > targetTurn) {
+            delete frames[key];
+        }
+    }
+    return true;
 }
 
 /** 前置条件引用的键。 */
@@ -105,6 +173,9 @@ export function syncTurn(state, floor) {
     }
     state.turn = next;
     if (next < prev) {
+        // 先按楼层快照复原（删楼 / 切分支 / 重生成都会走到这里），
+        // 再把比当前楼层更晚的时间戳清掉，让自动触发能重新满足。
+        restoreFrame(state, next);
         for (const ds of Object.values(state.decks || {})) {
             if (Number(ds?.lastTurn) > next) {
                 ds.lastTurn = -1;
@@ -233,6 +304,10 @@ export function drawDeck(state, deck, options = {}) {
     ds.lastDecisionTurn = turn;
     ds.holdStart = turn;
     ds.holdTurns = Math.max(1, Number(deck.hold?.turns) || 1);
+    // 记下抽中时的「游戏内天数」，按天冷却的合集从这一天开始算。
+    if (Number.isFinite(Number(state.gameDay))) {
+        ds.gameDay = Number(state.gameDay);
+    }
 
     pushLedger(state, {
         deck: deck.id,
@@ -326,6 +401,14 @@ export function availableItems(state, deck) {
     }
     const ds = deckState(state, deck.id);
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
+    // 按游戏内天数冷却：整池一起等，直到 MVU 的日期走过 N 天。
+    if (deck.timeUnit === 'day' && cooldown > 0) {
+        const now = Number.isFinite(Number(state.gameDay)) ? Number(state.gameDay) : null;
+        const last = Number.isFinite(Number(ds.gameDay)) ? Number(ds.gameDay) : null;
+        if (now !== null && last !== null && now - last < cooldown) {
+            return [];
+        }
+    }
     const excluded = new Set(cooldown > 0 ? ds.recent.slice(-cooldown) : []);
     const done = doneSet(state);
     const turn = Number(state.turn) || 0;
@@ -602,4 +685,82 @@ export function resetDeckState(state, deckId) {
         lastTurn: -1,
         lastDecisionTurn: -1,
     };
+}
+
+// ---------------------------------------------------------------------------
+// 游戏内时间：从 MVU 变量里读「年月日」，换算成天数
+// ---------------------------------------------------------------------------
+
+const GAME_DATE_RE = /(\d{1,5})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+
+/** 「天元482年7月15日」→ 天数索引；认不出返回 null。 */
+export function parseGameDay(text) {
+    const m = String(text || '').match(GAME_DATE_RE);
+    if (!m) {
+        return null;
+    }
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+        return null;
+    }
+    return year * 360 + (month - 1) * 30 + (day - 1);
+}
+
+/** 在一个变量对象里找日期字段（键名优先，其次全量找），最多下钻 4 层。 */
+export function gameDayFromVariables(vars, depth = 0) {
+    if (vars == null || depth > 4) {
+        return null;
+    }
+    if (typeof vars === 'string') {
+        return parseGameDay(vars);
+    }
+    if (typeof vars !== 'object') {
+        return null;
+    }
+    if (Array.isArray(vars)) {
+        for (const value of vars.slice(0, 20)) {
+            const found = gameDayFromVariables(value, depth + 1);
+            if (found !== null) {
+                return found;
+            }
+        }
+        return null;
+    }
+    const keys = Object.keys(vars).slice(0, 80);
+    for (const key of keys) {
+        if (/日期|时间|date|time|day/i.test(key)) {
+            const found = gameDayFromVariables(vars[key], depth + 1);
+            if (found !== null) {
+                return found;
+            }
+        }
+    }
+    for (const key of keys) {
+        const found = gameDayFromVariables(vars[key], depth + 1);
+        if (found !== null) {
+            return found;
+        }
+    }
+    return null;
+}
+
+/**
+ * 当前游戏内天数：先看聊天变量，再看最近几条消息附带的变量。
+ * 没有 MVU 或没有日期字段时返回 null（按天冷却的合集就退回按楼层算）。
+ */
+export function currentGameDay(ctx) {
+    const sources = [ctx?.chatMetadata?.variables];
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat.slice(-6) : [];
+    for (const message of chat) {
+        sources.push(message?.variables);
+    }
+    for (const source of sources) {
+        const found = gameDayFromVariables(source);
+        if (found !== null) {
+            return found;
+        }
+    }
+    return null;
 }

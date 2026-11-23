@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 import { buildDirectorPrompt } from '../src/inject.js';
 
@@ -904,6 +904,76 @@ test('初始值也会算作「出现过」，后面 requires 它的条目能解�
     const pool = availableItems(state, { ...deck, cooldown: 0 })
         .map((item) => item.id);
     assert.ok(pool.includes('p2'), 'p2 should be unlocked after p1 initial');
+});
+
+
+section('楼层回退');
+test('删楼后当前值跟着回到那一层', () => {
+    const deck = {
+        id: 'rb',
+        name: '回退测试',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1 },
+            { id: 'b', name: 'B', text: 'B', weight: 1 },
+        ],
+    };
+    const state = createState('rb-seed', 5);
+    const ds = deckState(state, 'rb');
+    ds.current = ['a'];
+    captureFrame(state);
+    syncTurn(state, 7);
+    drawDeck(state, deck, { force: true });
+    captureFrame(state);
+    assert.ok(deckState(state, 'rb').current.length === 1);
+    syncTurn(state, 5);
+    assert.deepEqual(deckState(state, 'rb').current, ['a']);
+});
+
+test('回退后进度也一起回退，一次性条目可以重新抽到', () => {
+    const deck = {
+        id: 'rb2',
+        name: '回退进度',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'x', name: 'X', text: 'X', weight: 1 }],
+    };
+    const state = createState('rb-seed-2', 3);
+    captureFrame(state);
+    syncTurn(state, 6);
+    const r = drawDeck(state, deck, { force: true });
+    captureFrame(state);
+    assert.equal(state.progress.length, 1);
+    syncTurn(state, 3);
+    assert.deepEqual(state.progress, []);
+    assert.ok(r.changed);
+});
+
+
+section('按游戏内天数冷却');
+test('能解析「年月日」，认不出就返回 null', () => {
+    assert.equal(parseGameDay('天元482年7月15日'), 482 * 360 + 6 * 30 + 14);
+    assert.equal(parseGameDay('没有日期'), null);
+    assert.equal(gameDayFromVariables({ stat_data: { 世界变量: { 当前日期: '天元482年7月15日' } } }), 482 * 360 + 6 * 30 + 14);
+});
+
+test('按天冷却：没到天数就抽不到，到了就能抽', () => {
+    const deck = {
+        id: 'day-deck',
+        name: '按天',
+        cooldown: 3,
+        timeUnit: 'day',
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1 }],
+    };
+    const state = createState('day-seed', 1);
+    const ds = deckState(state, 'day-deck');
+    state.gameDay = 100;
+    ds.gameDay = 98;
+    assert.deepEqual(availableItems(state, deck), []);
+    ds.gameDay = 90;
+    assert.equal(availableItems(state, deck).length, 1);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
