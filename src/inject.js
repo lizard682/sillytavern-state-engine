@@ -7,6 +7,8 @@
  * - before 提示词最前（position=2 BEFORE_PROMPT）
  */
 
+import { availableItems } from './state.js';
+
 export const PROMPT_POSITION = { chat: 1, prompt: 0, before: 2 };
 export const PROMPT_ROLE = { system: 0, user: 1, assistant: 2 };
 export const DIRECTOR_KEY = 'stateEngine:director';
@@ -89,6 +91,7 @@ export const DEFAULT_AI_TEMPLATE = [
 export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, contextInfo = {}) {
     const currentByDeck = contextInfo.currentByDeck || {};
     const done = contextInfo.done instanceof Set ? contextInfo.done : new Set(contextInfo.done || []);
+    const state = contextInfo.state || null;
     const usable = decks.filter((deck) => deck.enabled !== false && deck.trigger?.ai === true);
     // 有些合集不是靠 AI 触发，而是靠 AI 决定「什么时候结束」。
     const endable = decks.filter((deck) => deck.enabled !== false
@@ -105,26 +108,57 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
     const currentNames = (deckId) => (Array.isArray(currentByDeck[deckId]) ? currentByDeck[deckId] : [])
         .map((id) => nameOf(deckId, id))
         .filter(Boolean);
+    // 真正现在能抽到的条目：冷却、权重、一次性、前置、排除都算过之后的结果。
+    const availableIds = (deck) => {
+        if (!state || !deck) {
+            return null;
+        }
+        try {
+            return new Set(availableItems(state, deck).map((item) => item?.id).filter(Boolean));
+        } catch {
+            return null;
+        }
+    };
+    const splitPending = (deck, items) => {
+        const avail = availableIds(deck);
+        const pending = [];
+        const locked = [];
+        for (const item of items) {
+            const id = item?.id;
+            if (!id || done.has(`${deck.id}::${id}`)) {
+                continue;
+            }
+            const name = String(item.name || '').trim();
+            if (!name) {
+                continue;
+            }
+            if (!avail || avail.has(id)) {
+                pending.push(name);
+            } else if (Number(item.weight) > 0) {
+                locked.push(name);
+            }
+        }
+        return { pending, locked };
+    };
 
     const lines = usable.map((deck) => {
         const extra = String(deck.aiPrompt || '').trim();
         const items = Array.isArray(itemsByDeck[deck.id]) ? itemsByDeck[deck.id] : [];
         const cur = currentNames(deck.id);
-        // 还没轮到过的条目（按清单顺序），让模型知道剧情往哪走。
-        const pendingAll = items
-            .filter((item) => item?.id && !done.has(`${deck.id}::${item.id}`))
-            .map((item) => String(item.name || '').trim())
-            .filter(Boolean);
-        const pending = pendingAll.slice(0, 12);
+        const { pending, locked } = splitPending(deck, items);
         const parts = [];
         if (cur.length) {
             parts.push(`当前：${cur.join('、')}`);
         }
         if (pending.length) {
-            const more = pendingAll.length > pending.length ? '…' : '';
-            parts.push(`还没轮到：${pending.join('、')}${more}`);
+            const more = pending.length > 12 ? '…' : '';
+            parts.push(`现在可以抽：${pending.slice(0, 12).join('、')}${more}`);
         }
-        if (!cur.length && !pending.length && items.length === 0) {
+        if (locked.length) {
+            const more = locked.length > 6 ? '…' : '';
+            parts.push(`还没解锁：${locked.slice(0, 6).join('、')}${more}`);
+        }
+        if (!cur.length && !pending.length && !locked.length && items.length === 0) {
             parts.push('（这份清单还没有条目）');
         }
         // 挂在它下面的支线：把每条支线当前停在哪、后面还有哪几幕告诉模型。
@@ -133,17 +167,13 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
             const childLines = children.map((child) => {
                 const childCur = currentNames(child.id);
                 const childItems = Array.isArray(itemsByDeck[child.id]) ? itemsByDeck[child.id] : [];
-                const childPending = childItems
-                    .filter((item) => item?.id && !done.has(`${child.id}::${item.id}`))
-                    .map((item) => String(item.name || '').trim())
-                    .filter(Boolean)
-                    .slice(0, 8);
+                const { pending: childPending } = splitPending(child, childItems);
                 const bits = [];
                 if (childCur.length) {
                     bits.push(`当前：${childCur.join('、')}`);
                 }
                 if (childPending.length) {
-                    bits.push(`接下来：${childPending.join('、')}`);
+                    bits.push(`接下来：${childPending.slice(0, 8).join('、')}`);
                 }
                 return `  └ ${child.name}${bits.length ? `｜${bits.join('｜')}` : ''}｜要推进它就申请抽「${deck.name}」`;
             });

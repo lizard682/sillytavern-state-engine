@@ -1153,6 +1153,7 @@ function refreshInjections() {
     const director = buildDirectorPrompt(directorDecks, settings.aiTemplate, itemsByDeck, {
         currentByDeck,
         done: doneSet(store.state),
+        state: store.state,
     });
     const aiDepth = Math.max(0, Number(settings.aiDepth) || 4);
     ctx.setExtensionPrompt(DIRECTOR_KEY, director, PROMPT_POSITION.chat, aiDepth, false, PROMPT_ROLE.system);

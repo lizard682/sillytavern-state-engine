@@ -857,6 +857,35 @@ test('没有开启 AI 判定的合集不会出现在提示里', () => {
     assert.equal(text, '');
 });
 
+
+test('已经出现过、或前置没满足的条目，不会混进「现在可以抽」', () => {
+    const deck = {
+        id: 'dir-deck',
+        name: '剧情线',
+        enabled: true,
+        trigger: { ai: true },
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'a', name: '第一条 代婚', weight: 1, once: true, requires: [], excludes: [], cooldown: null },
+            { id: 'b', name: '第二条 洞房', weight: 1, once: true, requires: ['dir-deck::a'], excludes: [], cooldown: null },
+            { id: 'c', name: '第三条 三日', weight: 1, once: true, requires: ['dir-deck::b'], excludes: [], cooldown: null },
+        ],
+    };
+    const state = createState('dir-seed', 5);
+    state.progress = ['dir-deck::a'];
+    state.decks['dir-deck'] = { current: ['a'], recent: ['a'], nonce: 0, lastTurn: 5, lastDecisionTurn: 5, itemTurns: { a: 5 } };
+    const text = buildDirectorPrompt([deck], '{{decks}}', { 'dir-deck': deck.items }, {
+        currentByDeck: { 'dir-deck': ['a'] },
+        done: new Set(state.progress),
+        state,
+    });
+    assert.ok(text.includes('当前：第一条 代婚'), 'should show current');
+    assert.ok(text.includes('第二条 洞房'), 'b is available once a appeared');
+    assert.ok(!text.includes('现在可以抽：第一条'), 'already appeared item must not be listed as drawable');
+    assert.ok(text.includes('还没解锁：第三条 三日'), 'c should be marked locked');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);
