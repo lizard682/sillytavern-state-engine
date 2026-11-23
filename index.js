@@ -2665,6 +2665,7 @@ function buildPanel() {
                     <label class="se-switch" title="勾上后，你在酒馆里点「导出」的那一刻会把当前合集写进角色卡，不用再单独点按钮">
                         <input type="checkbox" id="se-auto-card-sync"><span>随卡导出</span>
                     </label>
+                    <button type="button" class="menu_button" data-action="open-settings" title="跳到插件设置（AI 模板、插入深度、公共合集库）">设置</button>
                     <input type="file" id="se-file" accept=".json,application/json" multiple hidden>
                 </div>
             </div>
@@ -3125,6 +3126,12 @@ function bindPanelEvents() {
             }
         } else if (action === 'judge-now') {
             judgeNow();
+        } else if (action === 'open-settings') {
+            const settingsBlock = document.querySelector('#state-engine-panel details.se-settings');
+            if (settingsBlock) {
+                settingsBlock.open = true;
+                settingsBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
         } else if (action === 'clear-current') {
             const store = getStore();
             const deck = store?.decks.find((item) => item.id === deckId);
@@ -3348,6 +3355,84 @@ function onGenerationStarted(type, _params, isDryRun) {
     }
 }
 
+/**
+ * AI 消息落地后立刻认标记并抽签。
+ * 这样下一轮生成时注入已经是最新内容，不会出现「这一轮白跑、下一轮才换」。
+ */
+function onMessageReceived() {
+    // 等 ST 把消息写进 chat 再读。
+    setTimeout(() => {
+        try {
+            const store = getStore({ create: false });
+            if (!store || !settings.enabled) {
+                return;
+            }
+            processAiMarkers(store, liveContext());
+        } catch (error) {
+            console.warn('[state-engine] marker handling failed', error);
+        }
+    }, 150);
+}
+
+/**
+ * 只处理上一楼 AI 消息里的申请标记（不含楼层自动、关键词）。
+ * 返回真正抽中的合集数。
+ */
+function processAiMarkers(store, ctx) {
+    if (!store || !ctx) {
+        return 0;
+    }
+    syncTurn(store.state, ctx?.chat?.length ?? 0);
+    const floor = Number(store.state.turn) || 0;
+    const markers = markersInLastAiMessage();
+    if (markers.length === 0) {
+        return 0;
+    }
+    if (Number(store.state.markerFloor ?? -1) === floor) {
+        return 0;
+    }
+    const lockDeck = activeLockDeck(store.state, store.decks);
+    const fired = [];
+    for (const deck of store.decks) {
+        if (deck.enabled === false || !bindingActive(deck, ctx)) {
+            continue;
+        }
+        if (lockDeck && deck.id !== lockDeck.id) {
+            continue;
+        }
+        if ((deck.trigger || DEFAULT_TRIGGER).ai !== true) {
+            continue;
+        }
+        if (!markers.includes(deck.id)) {
+            continue;
+        }
+        if (deckExhausted(store.state, store.decks, deck.id)) {
+            continue;
+        }
+        // 锁定的合集就是焦点：跳过「只能由上级抽中 / 有上级」的限制。
+        const isLockedDeck = Boolean(lockDeck && deck.id === lockDeck.id);
+        if (!isLockedDeck && (deck.onlyFromParent === true || deck.parent || (deck.summon || DEFAULT_SUMMON).only === true)) {
+            continue;
+        }
+        const tree = drawDeckTree(store.state, store.decks, deck.id, { force: false, cause: 'ai' });
+        if (tree.result?.changed) {
+            fired.push(deck.id);
+        }
+    }
+    if (fired.length === 0) {
+        return 0;
+    }
+    const summoned = applySummons(store, ctx, fired);
+    if (summoned.length > 0) {
+        fired.push(...summoned);
+    }
+    store.state.markerFloor = floor;
+    saveStore({ immediate: true });
+    refreshInjections();
+    refreshPanelLight();
+    return fired.length;
+}
+
 export async function init() {
     try {
         context = globalThis.SillyTavern?.getContext?.();
@@ -3371,6 +3456,8 @@ export async function init() {
         }
         eventSource.on(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
+        // 消息一落地就认标记，别等下一轮生成开头：那样会白白浪费一整轮。
+        eventSource.on(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
         eventSource.on(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
         eventSource.on(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         renderPanel();
@@ -3393,6 +3480,7 @@ export async function clean() {
         const { eventSource, eventTypes } = ctx;
         eventSource?.removeListener?.(eventTypes.CHAT_CHANGED, onChatChanged);
         eventSource?.removeListener?.(eventTypes.GENERATION_STARTED, onGenerationStarted);
+        eventSource?.removeListener?.(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
         eventSource?.removeListener?.(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
         eventSource?.removeListener?.(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
         clearInjections(ctx, getDecks());
