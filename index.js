@@ -1140,6 +1140,10 @@ function advanceOnGeneration() {
         if (deck.onlyFromParent === true) {
             continue;
         }
+        // 有上级合集的，什么时候抽由上级决定：自己不参与楼层自动/关键词/AI 判定。
+        if (deck.parent) {
+            continue;
+        }
         // 「只在被唤起时出场」的合集，普通对话的自动/关键词/AI 都不碰它。
         if ((deck.summon || DEFAULT_SUMMON).only === true) {
             continue;
@@ -1974,6 +1978,9 @@ function renderEditor(store) {
     const summonNames = (summon.by || []).map((id) => store.decks.find((item) => item.id === id)?.name || id);
     const hold = deck.hold || DEFAULT_HOLD;
     const binding = deck.binding || DEFAULT_BINDING;
+    // 有上级合集的，什么时候抽由上级决定，自己那套触发条件不生效。
+    const parentDeck = deck.parent ? store.decks.find((item) => item.id === deck.parent) : null;
+    const isChildDeck = Boolean(deck.parent);
     const ds = deckState(store.state, deck.id);
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
     const cooling = cooldown > 0 ? ds.recent.slice(-cooldown).length : 0;
@@ -2051,6 +2058,7 @@ function renderEditor(store) {
         </div>
         <div class="se-hint se-binding-hint">${escapeHtml(mvuHint)}</div>
 
+        <div class="se-trigger-block" ${isChildDeck ? 'hidden' : ''}>
         <div class="se-section-title">什么时候抽</div>
         <div class="se-triggers">
             <label><input type="checkbox" data-trigger-field="manual" ${trigger.manual !== false ? 'checked' : ''}><span>手动（面板按钮）</span></label>
@@ -2090,6 +2098,8 @@ function renderEditor(store) {
             <textarea class="text_pole" data-deck-field="aiPrompt" rows="2" placeholder="比如：只有在她准备出门时才申请换装。">${escapeHtml(deck.aiPrompt || '')}</textarea>
             <div class="se-hint">模型会在回复末尾写标记，下一轮按标记抽。模板在底部「设置」里改。</div>
         </div>
+        </div>
+        ${isChildDeck ? `<div class="se-hint se-child-hint">挂在「${escapeHtml(parentDeck?.name || deck.parent)}」下面，什么时候抽由上级决定：轮到它时，它按权重和上级的其它内容竞争，抽中就进。它自己的手动/楼层/关键词/AI 判定都不生效。</div>` : ''}
         </div>
         <div class="se-settings-col">
         <div class="se-section-title">被谁唤起</div>
