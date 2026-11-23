@@ -1226,34 +1226,6 @@ function ensurePluginTime(store, ctx) {
     return time;
 }
 
-/** 每过 advanceEvery 个楼层算一天；天气按天轮换。推进结果写回 MVU 变量。 */
-function tickPluginTime(store, ctx) {
-    const time = ensurePluginTime(store, ctx);
-    const config = store?.state?.timeConfig;
-    if (!time || !config) {
-        return;
-    }
-    const every = Math.max(0, Number(config.advanceEvery) || 0);
-    if (every <= 0) {
-        return;
-    }
-    const turn = Number(store.state?.turn) || 0;
-    const last = Number(config.lastTurn);
-    if (!Number.isFinite(last) || last < 0) {
-        config.lastTurn = turn;
-        return;
-    }
-    const delta = Math.floor(turn / every) - Math.floor(last / every);
-    if (delta > 0) {
-        const current = parsePluginDay(time.日期) ?? 1;
-        const next = Math.max(1, current) + delta;
-        time.日期 = `第${next}天`;
-        time.天气 = WEATHERS[(next - 1) % WEATHERS.length];
-        config.lastTurn = turn;
-        ctx?.saveMetadataDebounced?.();
-    }
-}
-
 /**
  * 当前游戏内天数：优先卡自带的 MVU 日期，没有就用插件在 MVU 里注册的时间。
  * 两者都没有时返回 null（按天冷却的合集就退回按楼层）。
@@ -1273,26 +1245,6 @@ function effectiveGameDay(store, ctx) {
     return day !== null ? day : 1;
 }
 
-function renderTimeBlock(store) {
-    const nowInput = document.getElementById('se-time-now');
-    if (!nowInput) {
-        return;
-    }
-    const ctx = liveContext();
-    const time = ensureMvuTime(ctx);
-    if (!time) {
-        nowInput.value = '';
-        return;
-    }
-    const source = store?.state?.timeSource === 'card' ? '（由角色卡提供）' : '';
-    nowInput.value = `${time.日期} · ${time.时间} · ${time.天气}${source}`;
-    const every = document.querySelector('#state-engine-panel [data-time-field="advanceEvery"]');
-    const config = store?.state?.timeConfig || {};
-    if (every && document.activeElement !== every) {
-        every.value = String(Math.max(0, Number(config.advanceEvery) || 0));
-    }
-}
-
 function refreshInjections() {
     const ctx = liveContext();
     const store = getStore();
@@ -1309,8 +1261,8 @@ function refreshInjections() {
     }
     // 打开聊天、每轮生成前都顺手检查一次：第一条如果还是安装提醒，就换回原开局。
     fixWarningChatMessage().catch(() => {});
-    // 每次刷新都跟一下游戏内天数：卡自带 MVU 日期就用卡的，没有就用插件自己记的时间。
-    tickPluginTime(store, ctx);
+    // 卡里没有日期时，插件只在 MVU 变量里放一个初始日期（不自动推进），供「按天」的清单读取。
+    ensureMvuTime(ctx);
     const gameDay = effectiveGameDay(store, ctx);
     if (gameDay !== null) {
         store.state.gameDay = gameDay;
@@ -2839,7 +2791,6 @@ function renderPanel() {
     renderSidebar(store);
     renderEditor(store);
     renderGlobalBlock();
-    renderTimeBlock(store);
     updateInjectPreview();
 }
 
@@ -2899,20 +2850,6 @@ function buildPanel() {
                 <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
                 <button type="button" class="menu_button" data-action="import-card-decks" title="把这张角色卡里带着的合集补进当前聊天（已存在的同名合集不会被覆盖）">从角色卡导入合集</button>
                 <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
-                <div class="se-global-block se-time-block">
-                    <div class="se-section-title">游戏内时间 <span class="se-muted">（卡里没有 MVU 日期时，用这里的时间推进「按天」的清单）</span></div>
-                    <div class="se-form">
-                        <label class="se-field">
-                            <span>现在</span>
-                            <input type="text" class="text_pole" id="se-time-now" readonly>
-                        </label>
-                        <label class="se-field">
-                            <span>每几楼过一天（0 = 不自动）</span>
-                            <input type="number" class="text_pole" data-time-field="advanceEvery" min="0" step="1" value="0">
-                        </label>
-                    </div>
-                    <div class="se-hint">卡里带了 MVU 日期时以卡为准，这里的设定不生效；没有日期时改用插件自己的天数。天气按天轮换：晴 / 多云 / 阴 / 小雨 / 雪。</div>
-                </div>
                 <div class="se-global-block">
                     <div class="se-section-title">公共合集库 <span class="se-muted">（存在插件设置里，任何聊天、任何角色卡都能用）</span></div>
                     <div class="se-global-actions">
@@ -3391,20 +3328,6 @@ function bindPanelEvents() {
 
     root.addEventListener('change', (event) => {
         const target = event.target;
-        if (target?.dataset?.timeField) {
-            const store = getStore({ create: false });
-            if (store) {
-                const config = store.state.timeConfig && typeof store.state.timeConfig === 'object' ? store.state.timeConfig : {};
-                if (target.dataset.timeField === 'advanceEvery') {
-                    config.advanceEvery = Math.max(0, Number(target.value) || 0);
-                    config.lastTurn = Number(store.state?.turn) || 0;
-                    store.state.timeConfig = config;
-                    saveStore({ immediate: false });
-                    renderTimeBlock(store);
-                }
-            }
-            return;
-        }
         const deckId = selectedDeckId;
         if (!deckId || !deckById(deckId)) {
             return;
