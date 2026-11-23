@@ -78,6 +78,10 @@ let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, aut
 let cardSyncDirty = false;
 let selectedDeckId = null;
 let airExpanded = false;
+// 条目列表一次渲染多少条：条目多时先渲染一段，剩下的点「显示更多」再补。
+const ITEMS_PAGE_SIZE = 60;
+let itemsShown = ITEMS_PAGE_SIZE;
+let itemsDeckId = '';
 // 用户手动关掉「卡里带了合集」提示条后，记住是哪张卡、多少个，避免一直弹。
 let cardHintDismissed = '';
 
@@ -1722,6 +1726,94 @@ function syncEditor(deck) {
  * 生成/抽签之后的轻量刷新：只更新当前值、侧栏、账本。
  * 不重建编辑区，免得把创作者正在输入的条目内容和滚动位置冲掉。
  */
+/**
+ * 立即判断一次：用当前上下文原样问模型一次「现在要不要抽」，不必等下一轮生成。
+ * 走 ST 的 generateQuietPrompt，不写入聊天记录，只把模型返回的申请标记拿来抽。
+ */
+async function judgeNow() {
+    const store = getStore({ create: true });
+    if (!store) {
+        toast('warning', '先打开一个聊天。');
+        return;
+    }
+    if (judgeNow.running) {
+        return;
+    }
+    // 酒馆自己正在生成时再插一次静默生成，会把这边的请求也卡住，先让它跑完。
+    const stopBtn = document.getElementById('mes_stop');
+    if (stopBtn && getComputedStyle(stopBtn).display !== 'none') {
+        toast('info', '酒馆正在生成，等这一轮结束再点「立即判断」。');
+        return;
+    }
+    const ctx = liveContext();
+    if (typeof ctx?.generateQuietPrompt !== 'function') {
+        toast('error', '当前酒馆版本不支持静默生成。');
+        return;
+    }
+    const usable = store.decks.filter((deck) => deck.enabled !== false
+        && deck.trigger?.ai === true
+        && bindingActive(deck, ctx));
+    if (usable.length === 0) {
+        toast('info', '没有合集开着「AI 判定」，先勾上再判断。');
+        return;
+    }
+    judgeNow.running = true;
+    const btn = document.querySelector('[data-action="judge-now"]');
+    btn?.classList.add('se-busy');
+    try {
+        const itemsByDeck = Object.fromEntries(store.decks.map((deck) => [deck.id, Array.isArray(deck.items) ? deck.items : []]));
+        const currentByDeck = Object.fromEntries(store.decks.map((deck) => {
+            const ids = (store.state?.decks?.[deck.id]?.current || []).map((item) => item?.id).filter(Boolean);
+            return [deck.id, ids];
+        }));
+        const lockDeck = activeLockDeck(store.state, store.decks);
+        const prompt = buildDirectorPrompt(
+            lockDeck ? usable.filter((deck) => deck.id === lockDeck.id) : usable,
+            settings.aiTemplate,
+            itemsByDeck,
+            { currentByDeck, done: doneSet(store.state), state: store.state, lockName: lockDeck ? lockDeck.name : '' },
+        );
+        if (!prompt) {
+            toast('info', '现在没有可申请的清单。');
+            return;
+        }
+        toast('info', '正在让模型判断一次…');
+        const reply = await Promise.race([
+            ctx.generateQuietPrompt({ quietPrompt: prompt, skipWIAN: true }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 60000)),
+        ]);
+        if (reply === null) {
+            toast('warning', '模型 60 秒内没有回话，这次判断取消了。');
+            return;
+        }
+        const markers = [...String(reply || '').matchAll(/<!--\s*SE:([a-zA-Z0-9_-]{1,64})\s*-->/g)].map((match) => match[1]);
+        if (markers.length === 0) {
+            toast('info', '模型这次没有申请任何清单。');
+            return;
+        }
+        let fired = 0;
+        for (const id of new Set(markers)) {
+            const deck = usable.find((item) => item.id === id);
+            if (!deck) {
+                continue;
+            }
+            const tree = drawDeckTree(store.state, store.decks, deck.id, { force: true, cause: 'ai' });
+            if (tree.result?.changed) {
+                fired += 1;
+            }
+        }
+        saveStore({ immediate: fired > 0 });
+        refreshInjections();
+        refreshPanelLight();
+        toast(fired > 0 ? 'success' : 'info', fired > 0 ? `立即判断：抽了 ${fired} 个合集。` : '模型申请了，但没有可抽的条目。');
+    } catch (error) {
+        toast('error', `立即判断失败：${error?.message || error}`);
+    } finally {
+        judgeNow.running = false;
+        btn?.classList.remove('se-busy');
+    }
+}
+
 function refreshPanelLight() {
     const root = document.getElementById(PANEL_ID);
     const store = getStore();
@@ -2189,7 +2281,10 @@ function renderRequireList(deck, item, store, kind = 'requires') {
 function renderItems(deck, store) {
     const items = deck.items || [];
     const done = doneSet(store.state);
-    const rows = items.map((item) => {
+    // 条目多的时候只先渲染一部分：300+ 条一次性铺开，光 DOM 就够卡住整块面板。
+    const shown = items.slice(0, itemsShown);
+    const rest = items.length - shown.length;
+    const rows = shown.map((item) => {
         const weight = Math.max(0, Number(item.weight) || 0);
         const used = item.once && done.has(itemRef(deck.id, item.id));
         const needCount = Array.isArray(item.requires) ? item.requires.length : 0;
@@ -2227,18 +2322,39 @@ function renderItems(deck, store) {
                     <span>这条自己的冷却（轮）</span>
                     <input type="number" class="text_pole se-item-cooldown" data-item-field="cooldown" min="0" step="1" value="${item.cooldown === null || item.cooldown === undefined ? '' : item.cooldown}" placeholder="跟随合集 ${Number(deck.cooldown) || 0} 轮" title="填数字后，这条被抽中后要隔这么多轮才可能再出现；留空就用合集设置的冷却（${Number(deck.cooldown) || 0} 轮）">
                 </label>
-                ${renderRequireList(deck, item, store, 'requires')}
-                ${renderRequireList(deck, item, store, 'excludes')}
+                <div class="se-require-slot" data-slot="requires"></div>
+                <div class="se-require-slot" data-slot="excludes"></div>
             </div>
         </div>`;
     }).join('');
     return `
         <div class="se-items">
             ${rows || '<div class="se-items-empty">还没有条目。点下面的「+ 添加条目」。</div>'}
+            ${rest > 0 ? `<div class="se-items-more"><button type="button" class="menu_button" data-action="show-more-items">显示更多（还有 ${rest} 条）</button></div>` : ''}
         </div>
         <div class="se-items-foot">
             <button type="button" class="menu_button" data-action="add-item" data-deck="${escapeHtml(deck.id)}">+ 添加条目</button>
         </div>`;
+}
+
+// 前置 / 排除的选择器很重（要把全部合集全部条目铺成勾选框），只在条目真正展开时才生成。
+function fillRequireSlots(row, deck, store) {
+    if (!row || !deck || !store) {
+        return;
+    }
+    const itemId = row.dataset.item;
+    const item = (deck.items || []).find((entry) => entry.id === itemId);
+    if (!item) {
+        return;
+    }
+    for (const kind of ['requires', 'excludes']) {
+        const slot = row.querySelector(`.se-require-slot[data-slot="${kind}"]`);
+        if (!slot || slot.dataset.filled === '1') {
+            continue;
+        }
+        slot.innerHTML = renderRequireList(deck, item, store, kind);
+        slot.dataset.filled = '1';
+    }
 }
 
 function renderEditor(store) {
@@ -2266,6 +2382,12 @@ function renderEditor(store) {
     const ds = deckState(store.state, deck.id);
     const cooldown = Math.max(0, Number(deck.cooldown) || 0);
     const cooling = cooldown > 0 ? ds.recent.slice(-cooldown).length : 0;
+
+    // 换合集时把「显示到第几条」重置回第一页。
+    if (itemsDeckId !== deck.id) {
+        itemsDeckId = deck.id;
+        itemsShown = ITEMS_PAGE_SIZE;
+    }
 
     const mvuNames = detectMvuNames();
     const charName = currentCharacterName();
@@ -2559,6 +2681,7 @@ function buildPanel() {
             <div class="se-takebar">
                 <span id="se-take-preview" class="se-take-preview"></span>
                 <div class="se-take-actions">
+                    <button type="button" class="menu_button se-judge-btn" data-action="judge-now" title="现在就用当前上下文问一次模型「要不要抽」，不等下一轮生成（会消耗一次额外的生成额度）">立即判断</button>
                     <button type="button" class="menu_button se-clear-btn" data-action="clear-current" title="只清空当前抽中的内容；条目的「已出现」记录和冷却都不重置">清除</button>
                     <button type="button" class="menu_button se-take-btn" data-action="draw">抽一条 <kbd>空格</kbd></button>
                 </div>
@@ -2952,8 +3075,15 @@ function bindPanelEvents() {
             root.querySelectorAll('.se-item-row.open').forEach((el) => el.classList.remove('open'));
             if (row && !wasOpen) {
                 row.classList.add('open');
+                // 前置/排除的勾选清单这时才生成，避免几百条一起铺开卡住面板。
+                const store = getStore();
+                const deck = store?.decks.find((item) => item.id === selectedDeckId);
+                fillRequireSlots(row, deck, store);
                 row.querySelector('.se-item-text')?.focus();
             }
+        } else if (action === 'show-more-items') {
+            itemsShown += ITEMS_PAGE_SIZE;
+            renderPanel();
         } else if (action === 'select-deck') {
             selectedDeckId = deckId;
             renderPanel();
@@ -2993,6 +3123,8 @@ function bindPanelEvents() {
             } else {
                 fallback();
             }
+        } else if (action === 'judge-now') {
+            judgeNow();
         } else if (action === 'clear-current') {
             const store = getStore();
             const deck = store?.decks.find((item) => item.id === deckId);
