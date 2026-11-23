@@ -785,8 +785,9 @@ function pendingCardDecks() {
     return cardDecksOf(character).filter((deck) => !have.has(deck.id));
 }
 
-/** 把角色卡里的合集导进当前聊天。 */
-function importCardDecks() {
+/** 把角色卡里的合集导进当前聊天。默认只补缺失，不覆盖已有内容。 */
+function importCardDecks(options = {}) {
+    const overwrite = options.overwrite === true;
     const character = currentCharacterCard();
     const store = getStore({ create: true });
     if (!character || !store) {
@@ -799,6 +800,7 @@ function importCardDecks() {
         return;
     }
     let added = 0;
+    let skipped = 0;
     let replaced = 0;
     for (const raw of incoming) {
         let deck;
@@ -810,8 +812,12 @@ function importCardDecks() {
         }
         const index = store.decks.findIndex((item) => item.id === deck.id);
         if (index >= 0) {
-            store.decks[index] = deck;
-            replaced += 1;
+            if (overwrite) {
+                store.decks[index] = deck;
+                replaced += 1;
+            } else {
+                skipped += 1;
+            }
         } else {
             store.decks.push(deck);
             added += 1;
@@ -821,8 +827,12 @@ function importCardDecks() {
     refreshInjections();
     renderPanel();
     cardHintDismissed = '';
-    toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
-    return { added, replaced };
+    if (skipped > 0 && !overwrite) {
+        toast('success', `已导入：新增 ${added} 个；${skipped} 个同名合集已存在，保持原样没有覆盖`);
+    } else {
+        toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
+    }
+    return { added, replaced, skipped };
 }
 
 /**
@@ -2299,7 +2309,6 @@ function renderPanel() {
         return;
     }
     const store = getStore();
-    renderCardHint();
     const enabled = root.querySelector('#se-enabled');
     if (enabled) {
         enabled.checked = settings.enabled !== false;
@@ -2505,6 +2514,11 @@ async function maybeShowCardImportPopup() {
     if (cardImportPopupOpen) {
         return;
     }
+    // 只在「这个聊天还是空的」时问一次；已经有合集的聊天绝不弹，避免拿卡里的旧快照覆盖。
+    const current = getStore();
+    if (current && Array.isArray(current.decks) && current.decks.length > 0) {
+        return;
+    }
     const pending = pendingCardDecks();
     if (pending.length === 0) {
         return;
@@ -2517,8 +2531,10 @@ async function maybeShowCardImportPopup() {
     cardImportPopupOpen = true;
     cardImportPopupKey = key;
     const names = pending.map((deck) => deck.name || deck.id).join('、');
+    const savedAt = Number(character?.data?.extensions?.[CARD_EXT_KEY]?.savedAt) || 0;
+    const savedText = savedAt ? `（这份是 ${new Date(savedAt).toLocaleString()} 存的，不是你聊天里最新的版本）` : '';
     const title = `这张卡自带了 ${pending.length} 个合集`;
-    const body = `「${escapeHtml(character?.name || '这张卡')}」里带着：${escapeHtml(names)}。<br><br>要把它们导入到当前聊天吗？导入后这些合集才会参与抽取。`;
+    const body = `「${escapeHtml(character?.name || '这张卡')}」里带着：${escapeHtml(names)}。${savedText}<br><br>要导进这个新聊天吗？导入会新增这些合集；已经存在的同名合集不会被覆盖。`;
     try {
         let PopupCtor = globalThis.Popup;
         let kind = globalThis.POPUP_TYPE?.CONFIRM;
@@ -2907,6 +2923,15 @@ function onChatChanged() {
                 console.warn('[state-engine] chat changed retry 2 failed', error);
             }
         }, 400);
+        // 只有「这个聊天还是空的」才会问一次要不要导入角色卡自带的合集；
+        // 放在切换聊天之后，而不是每次面板重绘都检查，避免每开一次聊天弹一次。
+        setTimeout(() => {
+            try {
+                renderCardHint();
+            } catch (error) {
+                console.warn('[state-engine] card hint failed', error);
+            }
+        }, 1200);
         // 装了插件的人打开带提醒的卡：立刻换回作者写的开场白，
         // 不等轮询、也不等用户刷新页面。恢复是幂等的，guard 删掉之后就不会再跑。
         restoreSelectedCharacterFirstMes();
