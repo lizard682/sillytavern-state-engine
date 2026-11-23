@@ -1860,10 +1860,14 @@ function triggerSummary(deck) {
     const trigger = deck.trigger || DEFAULT_TRIGGER;
     const parts = [];
     if (trigger.manual !== false) parts.push('手动');
-    if (trigger.auto) parts.push(`每${trigger.autoEvery}楼`);
+    if (trigger.auto) parts.push(`每${Number(trigger.autoEvery) || 1}楼`);
     if (trigger.keyword) parts.push('关键词');
     if (trigger.ai) parts.push('AI判定');
-    return parts.join(' / ') || '无';
+    if (parts.length === 0) {
+        return '无';
+    }
+    // 侧栏一行只放得下几个字：只写第一个，其余用「+N」带过，完整内容在合集设置里。
+    return parts.length === 1 ? parts[0] : `${parts[0]}+${parts.length - 1}`;
 }
 
 /** 合集在树里的层级：沿 parent 往上数，最多 3 层，防环。 */
@@ -2097,15 +2101,21 @@ function renderEditor(store) {
 
     const sameDeck = root.dataset.deck === deck.id;
     const prevSettingsOpen = root.querySelector('.se-deck-settings')?.open === true;
-    const prevScroll = sameDeck ? root.scrollTop : 0;
+    const prevScroll = sameDeck ? (root.querySelector('.se-view-scroll')?.scrollTop || 0) : 0;
     if (!sameDeck) {
         root.dataset.deck = deck.id;
         root.scrollTop = 0;
     }
 
     root.innerHTML = `
+        <div class="se-view-head">
+            <span class="se-view-deck">${escapeHtml(deck.name || deck.id)}</span>
+            <span class="se-view-count">${(deck.items || []).length} 条</span>
+            <span class="se-view-sub">${isChildDeck ? `挂在「${escapeHtml(parentDeck?.name || deck.parent)}」下` : (deck.lock === true ? '不可打断' : '')}</span>
+        </div>
+        <div class="se-view-scroll">
+
         <div class="se-items-block">
-            <div class="se-items-title"><span class="se-items-deck">${escapeHtml(deck.name || deck.id)}</span><span class="se-items-count">${(deck.items || []).length} 条</span></div>
             ${renderItems(deck, store)}
         </div>
 
@@ -2266,6 +2276,7 @@ function renderEditor(store) {
         </div>
 
         </details>
+        </div>
     `;
 
     if (sameDeck && prevSettingsOpen) {
@@ -2275,7 +2286,10 @@ function renderEditor(store) {
         }
     }
     if (sameDeck) {
-        root.scrollTop = prevScroll;
+        const scroller = root.querySelector('.se-view-scroll');
+        if (scroller) {
+            scroller.scrollTop = prevScroll;
+        }
     }
 }
 
