@@ -982,15 +982,17 @@ function renderGlobalBlock() {
         list.innerHTML = '<p class="se-muted">公共库是空的。选中一个合集后点「把当前合集发布到公共库」，以后任何聊天都能一键复制。</p>';
         return;
     }
-    list.innerHTML = decks.map((deck) => {
+    list.innerHTML = orderedDecks(decks).map(({ deck, depth }) => {
         const childCount = decks.filter((item) => item && item.parent === deck.id).length;
         const parts = [`${(deck.items || []).length} 条`];
         if (childCount > 0) {
             parts.push(`${childCount} 个子合集`);
         }
+        const indent = depth * 16;
+        const prefix = depth > 0 ? '└ ' : '';
         return `
         <div class="se-global-row">
-            <span class="se-global-name">${escapeHtml(deck.name || deck.id)}</span>
+            <span class="se-global-name" style="padding-left:${indent}px">${prefix}${escapeHtml(deck.name || deck.id)}</span>
             <span class="se-global-count">${parts.join(' · ')}</span>
             <button type="button" class="menu_button" data-action="copy-global" data-deck="${escapeHtml(deck.id)}">复制到本聊天</button>
             <button type="button" class="menu_button" data-action="delete-global" data-deck="${escapeHtml(deck.id)}">移出公共库</button>
