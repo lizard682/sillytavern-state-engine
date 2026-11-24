@@ -2629,7 +2629,7 @@ function renderItems(deck, store) {
                     <span>持续天数</span>
                     <input type="number" class="text_pole" data-item-field="hold.days" min="1" step="1" value="${Number(item.hold?.days) || 1}">
                 </label>
-                <details class="se-fatigue-block" ${item.fatigue ? 'open' : ''}>
+                <details class="se-multi-select se-fatigue-block" ${item.fatigue ? 'open' : ''}>
                     <summary>动态权重：${fatigueLabel(item.fatigue)}</summary>
                     <div class="se-fatigue-grid">
                         <label class="se-field">

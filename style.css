@@ -1536,3 +1536,23 @@
     color: var(--SmartThemeEmColor, #9aa0a6);
     font-size: 12px;
 }
+
+
+/* 动态权重：折叠条和旁边的下拉用同一种外观 */
+#state-engine-panel .se-fatigue-block {
+    margin: 6px 0;
+}
+
+#state-engine-panel .se-fatigue-grid {
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-top: 0;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 10px;
+}
+
+#state-engine-panel .se-fatigue-block .se-check-wide,
+#state-engine-panel .se-fatigue-block .se-hint {
+    grid-column: 1 / -1;
+}
