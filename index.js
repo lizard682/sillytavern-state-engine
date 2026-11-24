@@ -895,14 +895,33 @@ function globalDecks() {
 }
 
 const GLOBAL_CACHE_KEY = 'stateEngine.globalDecks';
+const GLOBAL_CACHE_LIMIT = 2 * 1024 * 1024;
+let globalCacheWarned = false;
+
+/** 往 localStorage 里留一份公共库镜像；太大或存不下时只警告一次，不挡正常保存。 */
+function mirrorGlobalDecks() {
+    const serialized = JSON.stringify(Array.isArray(settings.globalDecks) ? settings.globalDecks : []);
+    try {
+        if (serialized.length > GLOBAL_CACHE_LIMIT) {
+            localStorage.removeItem(GLOBAL_CACHE_KEY);
+            if (!globalCacheWarned) {
+                globalCacheWarned = true;
+                toast('warning', '公共库太大了，浏览器里不再留副本（不影响正常保存）。建议定期点「导出公共库」备份。');
+            }
+            return;
+        }
+        localStorage.setItem(GLOBAL_CACHE_KEY, serialized);
+    } catch (error) {
+        if (!globalCacheWarned) {
+            globalCacheWarned = true;
+            toast('warning', '浏览器本地存储满了，公共库副本没写成。请点「导出公共库」备份一次。');
+        }
+    }
+}
 
 function saveGlobalDecks(list) {
     settings.globalDecks = Array.isArray(list) ? list : [];
-    try {
-        localStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(settings.globalDecks));
-    } catch (error) {
-        /* localStorage 不可用时忽略，只是少一层兜底 */
-    }
+    mirrorGlobalDecks();
     saveSettings();
 }
 
@@ -3924,9 +3943,8 @@ export async function init() {
                 settings.globalDecks = cached;
                 saveSettings();
                 console.info('[state-engine] 从本地缓存恢复公共库', cached.length);
-            } else {
-                localStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(settings.globalDecks));
             }
+            mirrorGlobalDecks();
         } catch (error) {
             /* 缓存坏了就忽略 */
         }
