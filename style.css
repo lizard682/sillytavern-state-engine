@@ -231,14 +231,20 @@
 #state-engine-panel .se-body {
     flex: 1 1 auto;
     display: flex;
-    min-height: 260px;
+    min-height: 180px;
 }
 
-/* 底部展开的设置/记录限高并自己滚，不要把编辑区压成一条缝 */
+/* 底部展开的设置/记录限高并自己滚，不要把编辑区压成一条缝；
+   折叠时固定占一行，不能被挤扁到只剩半行字。 */
 #state-engine-panel details.se-ledger {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+    min-height: 36px;
     max-height: 42vh;
     overflow-y: auto;
+}
+
+#state-engine-panel details.se-ledger:not([open]) {
+    overflow: hidden;
 }
 
 #state-engine-panel .se-sidebar {
