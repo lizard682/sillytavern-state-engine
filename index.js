@@ -894,8 +894,15 @@ function globalDecks() {
     return Array.isArray(settings.globalDecks) ? settings.globalDecks : [];
 }
 
+const GLOBAL_CACHE_KEY = 'stateEngine.globalDecks';
+
 function saveGlobalDecks(list) {
     settings.globalDecks = Array.isArray(list) ? list : [];
+    try {
+        localStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(settings.globalDecks));
+    } catch (error) {
+        /* localStorage 不可用时忽略，只是少一层兜底 */
+    }
     saveSettings();
 }
 
@@ -3906,6 +3913,23 @@ export async function init() {
         context = globalThis.SillyTavern?.getContext?.();
         const { eventSource, eventTypes, extensionSettings } = context;
         settings = { ...settings, ...(extensionSettings?.[SETTINGS_KEY] || {}) };
+        // 公共库是全局的，settings.json 偶尔会因为「保存还没落盘就刷新」丢掉最后一次改动。
+        // 这里用 localStorage 做一层镜像：本地缓存比设置里多，就以本地为准补回来。
+        if (!Array.isArray(settings.globalDecks)) {
+            settings.globalDecks = [];
+        }
+        try {
+            const cached = JSON.parse(localStorage.getItem(GLOBAL_CACHE_KEY) || '[]');
+            if (Array.isArray(cached) && cached.length > settings.globalDecks.length) {
+                settings.globalDecks = cached;
+                saveSettings();
+                console.info('[state-engine] 从本地缓存恢复公共库', cached.length);
+            } else {
+                localStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(settings.globalDecks));
+            }
+        } catch (error) {
+            /* 缓存坏了就忽略 */
+        }
         if (!settings.aiTemplate) {
             settings.aiTemplate = DEFAULT_AI_TEMPLATE;
         }
