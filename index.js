@@ -1850,12 +1850,19 @@ function removeDeck(deckId) {
     if (!store || !deck) {
         return;
     }
-    if (!globalThis.confirm(`删除合集「${deck.name}」？\n这只影响当前聊天，原始文件不受影响。`)) {
+    const descendants = descendantDecks(store.decks, deckId);
+    const extra = descendants.length > 0 ? `\n它下面的 ${descendants.length} 个子合集也会一起删除。` : '';
+    if (!globalThis.confirm(`删除合集「${deck.name}」？${extra}\n这只影响当前聊天，原始文件不受影响。`)) {
         return;
     }
-    store.decks = store.decks.filter((item) => item.id !== deckId);
-    delete store.state.decks?.[deckId];
-    if (selectedDeckId === deckId) {
+    const removeIds = new Set([deckId, ...descendants.map((item) => item.id)]);
+    store.decks = store.decks.filter((item) => !removeIds.has(item.id));
+    for (const id of removeIds) {
+        if (store.state.decks) {
+            delete store.state.decks[id];
+        }
+    }
+    if (selectedDeckId && removeIds.has(selectedDeckId)) {
         selectedDeckId = store.decks[0]?.id || null;
     }
     saveStore({ immediate: true });
@@ -2294,12 +2301,34 @@ function exportDecks() {
 }
 
 function exportDeck(deckId) {
+    const store = getStore();
     const deck = deckById(deckId);
     if (!deck) {
         return;
     }
-    downloadJson(serializePack(deck), `state-engine-${deck.id}.json`);
-    toast('success', `已导出「${deck.name}」`);
+    const descendants = store ? descendantDecks(store.decks, deck.id) : [];
+    const packs = [deck, ...descendants].map((item) => serializePack(item));
+    downloadJson(packs, `state-engine-${deck.id}.json`);
+    toast('success', descendants.length > 0
+        ? `已导出「${deck.name}」和它的 ${descendants.length} 个子合集`
+        : `已导出「${deck.name}」`);
+}
+
+/** 某个合集的全部后代（按层级顺序，防环）。 */
+function descendantDecks(decks, rootId) {
+    const out = [];
+    const seen = new Set([rootId]);
+    const walk = (id) => {
+        for (const item of decks) {
+            if (item.parent === id && !seen.has(item.id)) {
+                seen.add(item.id);
+                out.push(item);
+                walk(item.id);
+            }
+        }
+    };
+    walk(rootId);
+    return out;
 }
 
 function importFiles(fileList) {
