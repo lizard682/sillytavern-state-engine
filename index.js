@@ -177,6 +177,20 @@ function normalizeDeckShape(deck) {
         const days = Number(deck.hold.days);
         deck.hold.days = Number.isFinite(days) ? Math.max(1, Math.floor(days)) : DEFAULT_HOLD.days;
     }
+    // 导出的包把层级写在 nesting 里，导入时映射回内部的 parent / onlyFromParent / entryWeight。
+    if (deck.nesting && typeof deck.nesting === 'object') {
+        if (typeof deck.parent !== 'string') {
+            deck.parent = typeof deck.nesting.parent === 'string' ? deck.nesting.parent : DEFAULT_NESTING.parent;
+        }
+        if (typeof deck.onlyFromParent !== 'boolean') {
+            deck.onlyFromParent = deck.nesting.onlyFromParent === true;
+        }
+        if (!Number.isFinite(Number(deck.entryWeight))) {
+            deck.entryWeight = Number.isFinite(Number(deck.nesting.entryWeight))
+                ? Math.max(0, Number(deck.nesting.entryWeight))
+                : DEFAULT_NESTING.entryWeight;
+        }
+    }
     if (typeof deck.parent !== 'string') {
         deck.parent = DEFAULT_NESTING.parent;
     }

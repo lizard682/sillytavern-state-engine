@@ -218,7 +218,9 @@ export function normalizeTimeUnit(raw) {
 }
 
 function normalizeNesting(raw) {
-    const n = isPlainObject(raw) ? raw : {};
+    const base = isPlainObject(raw) ? raw : {};
+    // 导出格式把层级包在 nesting 里；老格式也可能平铺在顶层。两种都认。
+    const n = isPlainObject(base.nesting) ? base.nesting : base;
     const parent = asString(n.parent);
     return {
         // 上级 id 只接受合法格式；不合法就当顶层，避免导入一份坏包把整棵树带歪。
