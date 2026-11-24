@@ -160,8 +160,14 @@ function normalizeInject(raw) {
     };
 }
 
-function normalizeScan(raw) {
-    const s = isPlainObject(raw) ? raw : {};
+/** AI 能看到什么：只给合集名（deck），还是连条目名一起给（items）。 */
+export const REVEAL_MODES = ['items', 'deck'];
+export const DEFAULT_REVEAL = 'items';
+function normalizeReveal(raw) {
+    return REVEAL_MODES.includes(raw) ? raw : DEFAULT_REVEAL;
+}
+
+function normalizeScan(raw) {    const s = isPlainObject(raw) ? raw : {};
     const sources = ['user', 'ai', 'both'];
     const fields = Array.isArray(s.fields)
         ? s.fields.filter((field) => SCAN_FIELDS.includes(field))
@@ -396,6 +402,7 @@ export function validatePack(raw) {
             compose: normalizeCompose(raw.compose),
             hold: normalizeHold(raw.hold),
             inject: normalizeInject(raw.inject),
+            reveal: normalizeReveal(raw.reveal),
             cooldown: asInt(raw.cooldown, 2, 0),
             timeUnit: normalizeTimeUnit(raw.timeUnit),
             pick: asInt(raw.pick, 1, 1),
@@ -422,6 +429,7 @@ export function serializePack(pack) {
         compose: normalizeCompose(pack.compose),
         hold: normalizeHold(pack.hold),
         inject: normalizeInject(pack.inject),
+        reveal: normalizeReveal(pack.reveal),
         cooldown: asInt(pack.cooldown, 2, 0),
         ...(normalizeTimeUnit(pack.timeUnit) === 'day' ? { timeUnit: 'day' } : {}),
         pick: asInt(pack.pick, 1, 1),

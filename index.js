@@ -162,6 +162,7 @@ function normalizeDeckShape(deck) {
         deck.summon.only = deck.summon.only === true;
     }
     deck.lock = deck.lock === true;
+    deck.reveal = deck.reveal === 'deck' ? 'deck' : 'items';
     deck.timeUnit = normalizeTimeUnit(deck.timeUnit);
     deck.compose = Array.isArray(deck.compose)
         ? [...new Set(deck.compose.filter((id) => typeof id === 'string' && id))]
@@ -1881,6 +1882,8 @@ function setDeckField(deckId, path, value) {
         deck[head][tail] = value;
     } else if (path === 'keywords') {
         deck.keywords = normalizeKeywords(value);
+    } else if (path === 'reveal') {
+        deck.reveal = value === 'deck' ? 'deck' : 'items';
     } else {
         deck[path] = value;
     }
@@ -2892,6 +2895,13 @@ function renderEditor(store) {
             </div>
         </details>
         <label class="se-checks se-check-wide"><input type="checkbox" data-summon-only ${summon.only ? 'checked' : ''}><span>只在被唤起时出场（平时的楼层自动、关键词、AI 判定都不碰它）</span></label>
+
+        <div class="se-section-title">AI 能看到什么</div>
+        <div class="se-hint">申请清单里，除了合集名，要不要把里面有什么条目也告诉 AI。条目很多又没什么可选的（比如纯推进剧情），选「只给合集名」能省 token 也不干扰它。</div>
+        <select class="text_pole" data-deck-field="reveal">
+            <option value="items" ${deck.reveal !== 'deck' ? 'selected' : ''}>合集名 + 条目名（默认）</option>
+            <option value="deck" ${deck.reveal === 'deck' ? 'selected' : ''}>只给合集名</option>
+        </select>
 
         <div class="se-section-title">组合（配套抽取）</div>
         <div class="se-hint">抽中这里的条目时，会从下面勾选的合集里顺带各抽一次，把结果填进条目文本的 {合集名} 占位符。例：条目写「{颜色}的连衣裙」，颜色抽到白色，注入就是「白色的连衣裙」。</div>

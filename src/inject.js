@@ -149,15 +149,17 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
         const items = Array.isArray(itemsByDeck[deck.id]) ? itemsByDeck[deck.id] : [];
         const cur = currentNames(deck.id);
         const { pending, locked } = splitPending(deck, items);
+        // 合集可以选「只给 AI 合集名」，不把里面有什么条目告诉它。
+        const hideItems = deck.reveal === 'deck';
         const parts = [];
         if (cur.length) {
             parts.push(`当前：${cur.join('、')}`);
         }
-        if (pending.length) {
+        if (!hideItems && pending.length) {
             const more = pending.length > 12 ? '…' : '';
             parts.push(`现在可以抽：${pending.slice(0, 12).join('、')}${more}`);
         }
-        if (locked.length) {
+        if (!hideItems && locked.length) {
             const more = locked.length > 6 ? '…' : '';
             parts.push(`还没解锁：${locked.slice(0, 6).join('、')}${more}`);
         }
@@ -171,11 +173,12 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
                 const childCur = currentNames(child.id);
                 const childItems = Array.isArray(itemsByDeck[child.id]) ? itemsByDeck[child.id] : [];
                 const { pending: childPending } = splitPending(child, childItems);
+                const childHide = child.reveal === 'deck';
                 const bits = [];
                 if (childCur.length) {
                     bits.push(`当前：${childCur.join('、')}`);
                 }
-                if (childPending.length) {
+                if (!childHide && childPending.length) {
                     bits.push(`接下来：${childPending.slice(0, 8).join('、')}`);
                 }
                 return `  └ ${child.name}${bits.length ? `｜${bits.join('｜')}` : ''}｜要推进它就申请抽「${deck.name}」`;
