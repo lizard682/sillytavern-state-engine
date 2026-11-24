@@ -304,6 +304,8 @@ export function drawDeck(state, deck, options = {}) {
     }
     // 记录进度：供「只出现一次」和别的条目的前置条件使用。
     recordProgress(state, deck.id, picked);
+    // 动态权重：降权累计 / 增权归零。
+    applyFatigueOnHit(state, deck, picked);
     ds.lastTurn = turn;
     ds.lastDecisionTurn = turn;
     ds.holdStart = turn;
@@ -405,6 +407,104 @@ export function bumpNonce(state, deckId) {    const ds = deckState(state, deckId
  * 这个合集此刻能抽的条目。
  * 排除：冷却中的、权重为 0 的、「只出现一次」已用过的、前置条件没满足的、排除条件被触发的。
  */
+/**
+ * 条目的「当前有效权重」：基础权重 × 动态倍率。
+ * 动态权重（fatigue）有两种：
+ *   decay：被抽中一次就往下掉，掉到下限以下进冷却，冷却结束回到 100%。
+ *   boost：一直没被抽中，每隔 N 轮往上加一点，直到被抽中才回到 100%。
+ * 冷却中返回 0（等于这一轮不进池）。
+ */
+export function effectiveWeight(state, deck, item, ds = deckState(state, deck.id), turn = Number(state.turn) || 0) {
+    const base = Math.max(0, Number(item.weight) || 0);
+    if (base <= 0) {
+        return 0;
+    }
+    const cfg = item.fatigue;
+    if (!cfg || typeof cfg !== 'object' || cfg.mode === 'off') {
+        return base;
+    }
+    if (!ds.fatigue || typeof ds.fatigue !== 'object') {
+        ds.fatigue = {};
+    }
+    let f = ds.fatigue[item.id];
+    if (!f || typeof f !== 'object') {
+        f = { mult: 1, lastHit: -1, cooledUntil: -1 };
+        ds.fatigue[item.id] = f;
+    }
+    const until = Number(f.cooledUntil);
+    if (Number.isFinite(until) && until >= 0) {
+        if (turn < until) {
+            return 0; // 冷却中
+        }
+        f.cooledUntil = -1;
+        f.mult = 1; // 冷却结束，恢复满权重
+    }
+    if (cfg.mode === 'boost') {
+        const every = Math.max(1, Number(cfg.everyTurns) || 1);
+        const last = Number(f.lastHit);
+        if (last >= 0) {
+            const steps = Math.floor((turn - last) / every);
+            if (steps > 0) {
+                const amount = Number(cfg.amount) || 10;
+                // 用绝对值算，反复读取也不会重复叠加。
+                const mult = cfg.ratio
+                    ? (1 + amount / 100) ** steps
+                    : 1 + (steps * amount) / 100;
+                const cap = Math.max(1, (Number(cfg.maxPercent) || 300) / 100);
+                f.mult = Math.min(cap, mult);
+            }
+        }
+    }
+    return base * Math.max(0, Number(f.mult) || 1);
+}
+
+/**
+ * 抽中之后更新动态权重：decay 往下掉、可能进冷却；boost 被抽中就回到 100%。
+ * 只处理这次真正抽中的条目。
+ */
+export function applyFatigueOnHit(state, deck, picked) {
+    const ds = deckState(state, deck.id);
+    if (!ds.fatigue || typeof ds.fatigue !== 'object') {
+        ds.fatigue = {};
+    }
+    const turn = Number(state.turn) || 0;
+    for (const hit of picked || []) {
+        const source = (deck.items || []).find((item) => item.id === hit.id);
+        const cfg = source?.fatigue;
+        if (!cfg || typeof cfg !== 'object' || cfg.mode === 'off') {
+            delete ds.fatigue[hit.id];
+            continue;
+        }
+        let f = ds.fatigue[hit.id];
+        if (!f || typeof f !== 'object') {
+            f = { mult: 1, lastHit: -1, cooledUntil: -1 };
+            ds.fatigue[hit.id] = f;
+        }
+        const every = Math.max(1, Number(cfg.everyTurns) || 1);
+        const last = Number(f.lastHit);
+        if (cfg.mode === 'decay') {
+            // 第一次抽中也算一次「用了」，往下掉一档；隔太久没抽中则先回到满权重再掉。
+            if (last < 0 || turn - last <= every) {
+                const amount = Math.max(0, Number(cfg.amount) || 10);
+                const mult = Number(f.mult) || 1;
+                f.mult = cfg.ratio
+                    ? Math.max(0, Math.round(mult * (1 - amount / 100) * 10000) / 10000)
+                    : Math.max(0, Math.round((mult - amount / 100) * 10000) / 10000);
+            } else {
+                f.mult = 1;
+            }
+            const base = Math.max(0, Number(hit.weight) || 0);
+            const floor = Math.max(0, Number(cfg.floorPercent) || 1) / 100;
+            if (base * (Number(f.mult) || 0) <= floor) {
+                f.cooledUntil = turn + Math.max(1, Number(cfg.recoverTurns) || 1);
+            }
+        } else {
+            f.mult = 1;
+        }
+        f.lastHit = turn;
+    }
+}
+
 export function availableItems(state, deck) {
     if (!deck || !Array.isArray(deck.items) || deck.items.length === 0) {
         return [];
@@ -423,7 +523,7 @@ export function availableItems(state, deck) {
     const done = doneSet(state);
     const turn = Number(state.turn) || 0;
     const itemTurns = ds.itemTurns && typeof ds.itemTurns === 'object' ? ds.itemTurns : {};
-    return deck.items.filter((item) => {
+    const kept = deck.items.filter((item) => {
         if (excluded.has(item.id)) {
             return false;
         }
@@ -458,6 +558,15 @@ export function availableItems(state, deck) {
         }
         return true;
     });
+    // 动态权重：把有效权重写进副本，抽签按它算；冷却中的（0）直接不进池。
+    const pool = [];
+    for (const item of kept) {
+        const eff = effectiveWeight(state, deck, item, ds, turn);
+        if (eff > 0) {
+            pool.push(eff === (Number(item.weight) || 0) ? item : { ...item, weight: eff });
+        }
+    }
+    return pool;
 }
 
 /** 某个合集的直接子合集（启用的）。 */

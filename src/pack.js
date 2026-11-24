@@ -259,6 +259,34 @@ export function normalizeExcludes(raw) {
     return normalizeRequires(raw);
 }
 
+const FATIGUE_MODES = ['off', 'decay', 'boost'];
+
+/**
+ * 动态权重（疲劳 / 增益）。数值都用「百分比」表达：
+ * - decay：被抽中一次权重就降 amount%；低于 floorPercent% 进冷却 recoverTurns 轮。
+ * - boost：每 everyTurns 轮没被抽中就涨 amount%，最多涨到 maxPercent%；被抽中回到 100%。
+ * - ratio 为 true 时，amount 按比例算（倍数/百分比复利），否则按固定百分点。
+ */
+export function normalizeFatigue(raw) {
+    if (!isPlainObject(raw)) {
+        return null;
+    }
+    const mode = FATIGUE_MODES.includes(raw.mode) ? raw.mode : 'off';
+    if (mode === 'off') {
+        return null;
+    }
+    const num = (value, fallback, min) => (Number.isFinite(Number(value)) ? Math.max(min, Number(value)) : fallback);
+    return {
+        mode,
+        everyTurns: Math.max(1, Math.floor(num(raw.everyTurns, 3, 1))),
+        amount: num(raw.amount, 10, 0),
+        ratio: raw.ratio === true,
+        floorPercent: num(raw.floorPercent, 1, 0),
+        recoverTurns: Math.max(1, Math.floor(num(raw.recoverTurns, 5, 1))),
+        maxPercent: num(raw.maxPercent, 300, 100),
+    };
+}
+
 /**
  * 把一条清单项整理成固定形状。
  * 允许作者只写字符串（会被当成标题），也允许写完整对象。
@@ -266,7 +294,7 @@ export function normalizeExcludes(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null, hold: null };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null, hold: null, fatigue: null };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -298,6 +326,8 @@ export function normalizeItem(raw, index = 0) {
             : null,
         // 条目自己的持续时长。留空 = 跟随合集设置。
         hold: isPlainObject(raw.hold) ? normalizeHold(raw.hold) : null,
+        // 动态权重（疲劳 / 增益）。没设就是普通权重。
+        fatigue: normalizeFatigue(raw.fatigue),
     };
 }
 
@@ -407,6 +437,7 @@ export function serializePack(pack) {
             ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),
             ...(Number.isFinite(Number(item.cooldown)) && item.cooldown !== null ? { cooldown: item.cooldown } : {}),
             ...(isPlainObject(item.hold) ? { hold: normalizeHold(item.hold) } : {}),
+            ...(item.fatigue ? { fatigue: normalizeFatigue(item.fatigue) } : {}),
         })),
     };
 }

@@ -29,6 +29,7 @@ import {
     normalizeKeywords,
     normalizeRequires,
     normalizeExcludes,
+    normalizeFatigue,
     normalizeTimeUnit,
     serializePack,
     validatePack,
@@ -225,6 +226,8 @@ function normalizeDeckShape(deck) {
             } else {
                 item.hold = null;
             }
+            // 动态权重（疲劳 / 增益）：没设就是 null。
+            item.fatigue = normalizeFatigue(item.fatigue);
             delete item.situation;
         }
     });
@@ -2079,9 +2082,20 @@ function setItemField(deckId, itemId, field, value) {
             days: Math.max(1, Number(base.days) || 1),
         };
         item.hold[field.split('.')[1]] = Math.max(1, Math.floor(Number(value) || 1));
+    } else if (field.startsWith('fatigue.')) {
+        const key = field.split('.')[1];
+        if (key === 'mode') {
+            const mode = String(value || '');
+            item.fatigue = mode && mode !== 'off' ? normalizeFatigue({ ...(item.fatigue || {}), mode }) : null;
+        } else if (item.fatigue) {
+            item.fatigue = normalizeFatigue({
+                ...item.fatigue,
+                [key]: key === 'ratio' ? value === true || value === 'true' : Number(value),
+            });
+        }
     } else {
         item[field] = field === 'weight'
-        ? Math.max(0, Number(value) || 0)
+        ? Math.max(0, (Number(value) || 0) / 100)
         : field === 'once'
             ? value === true || value === 'true'
             : field === 'initial'
@@ -2534,6 +2548,23 @@ function holdLabel(hold) {
     return '一直保留';
 }
 
+function fatigueLabel(cfg) {
+    const f = cfg;
+    if (!f) {
+        return '关闭（固定权重）';
+    }
+    const every = Number(f.everyTurns) || 3;
+    const amount = Number(f.amount) || 10;
+    const step = f.ratio ? `当前值的 ${amount}%` : `${amount}%`;
+    if (f.mode === 'decay') {
+        return `降权：每抽中一次 −${step}（间隔 ${every} 轮内），低于 ${Number(f.floorPercent) || 1}% 冷却 ${Number(f.recoverTurns) || 5} 轮`;
+    }
+    if (f.mode === 'boost') {
+        return `增权：每 ${every} 轮没抽中 +${step}，最高 ${Number(f.maxPercent) || 300}%`;
+    }
+    return '关闭（固定权重）';
+}
+
 function renderItems(deck, store) {
     const items = deck.items || [];
     const done = doneSet(store.state);
@@ -2542,6 +2573,8 @@ function renderItems(deck, store) {
     const rest = items.length - shown.length;
     const rows = shown.map((item) => {
         const weight = Math.max(0, Number(item.weight) || 0);
+        // 界面上用百分比：1 是基准 = 100%。
+        const weightPercent = Math.round(weight * 100);
         const used = item.once && done.has(itemRef(deck.id, item.id));
         const needCount = Array.isArray(item.requires) ? item.requires.length : 0;
         const avoidCount = Array.isArray(item.excludes) ? item.excludes.length : 0;
@@ -2556,7 +2589,7 @@ function renderItems(deck, store) {
         <div class="se-item-row" data-item="${escapeHtml(item.id)}">
             <div class="se-item-main" data-action="toggle-item">
                 <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
-                <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="1" value="${weight}" title="相对权重：1 是基准，0 表示永不出现">
+                <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="10" value="${weightPercent}" title="出现概率：100% 是基准；填 0 表示永不出现。填 200% 就是基准的两倍。">
                 <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
             </div>
             <div class="se-item-edit">
@@ -2596,6 +2629,44 @@ function renderItems(deck, store) {
                     <span>持续天数</span>
                     <input type="number" class="text_pole" data-item-field="hold.days" min="1" step="1" value="${Number(item.hold?.days) || 1}">
                 </label>
+                <details class="se-fatigue-block" ${item.fatigue ? 'open' : ''}>
+                    <summary>动态权重：${fatigueLabel(item.fatigue)}</summary>
+                    <div class="se-fatigue-grid">
+                        <label class="se-field">
+                            <span>玩法</span>
+                            <select class="text_pole" data-item-field="fatigue.mode">
+                                <option value="off" ${item.fatigue ? '' : 'selected'}>关闭（固定权重）</option>
+                                <option value="decay" ${item.fatigue?.mode === 'decay' ? 'selected' : ''}>降权（越抽越少）</option>
+                                <option value="boost" ${item.fatigue?.mode === 'boost' ? 'selected' : ''}>增权（越不抽越多）</option>
+                            </select>
+                        </label>
+                        <label class="se-field">
+                            <span>间隔（轮）</span>
+                            <input type="number" class="text_pole" data-item-field="fatigue.everyTurns" min="1" step="1" value="${item.fatigue?.everyTurns ?? 3}" ${item.fatigue ? '' : 'disabled'}>
+                        </label>
+                        <label class="se-field">
+                            <span>幅度（%）</span>
+                            <input type="number" class="text_pole" data-item-field="fatigue.amount" min="0" step="5" value="${item.fatigue?.amount ?? 10}" ${item.fatigue ? '' : 'disabled'}>
+                        </label>
+                        <label class="se-check se-check-wide">
+                            <input type="checkbox" data-item-field="fatigue.ratio" ${item.fatigue?.ratio ? 'checked' : ''} ${item.fatigue ? '' : 'disabled'}>
+                            <span>按比例算（每次乘/除当前值，不按固定百分点）</span>
+                        </label>
+                        <label class="se-field se-fatigue-decay" ${item.fatigue?.mode === 'decay' ? '' : 'hidden'}>
+                            <span>低于多少%进冷却</span>
+                            <input type="number" class="text_pole" data-item-field="fatigue.floorPercent" min="0" step="1" value="${item.fatigue?.floorPercent ?? 1}">
+                        </label>
+                        <label class="se-field se-fatigue-decay" ${item.fatigue?.mode === 'decay' ? '' : 'hidden'}>
+                            <span>冷却几轮</span>
+                            <input type="number" class="text_pole" data-item-field="fatigue.recoverTurns" min="1" step="1" value="${item.fatigue?.recoverTurns ?? 5}">
+                        </label>
+                        <label class="se-field se-fatigue-boost" ${item.fatigue?.mode === 'boost' ? '' : 'hidden'}>
+                            <span>最高涨到（%）</span>
+                            <input type="number" class="text_pole" data-item-field="fatigue.maxPercent" min="100" step="50" value="${item.fatigue?.maxPercent ?? 300}">
+                        </label>
+                    </div>
+                    <div class="se-hint">降权：每被抽中一次就往下掉，掉到下限进冷却，冷却结束回到 100%。增权：隔一段时间没被抽中就往上加，被抽中后回到 100%。</div>
+                </details>
                 <div class="se-require-slot" data-slot="requires"></div>
                 <div class="se-require-slot" data-slot="excludes"></div>
             </div>
@@ -3508,6 +3579,22 @@ function bindPanelEvents() {
                 if (target.dataset.itemField === 'hold.mode') {
                     row.querySelector('.se-item-hold-turns')?.toggleAttribute('hidden', value !== 'turns');
                     row.querySelector('.se-item-hold-days')?.toggleAttribute('hidden', value !== 'days');
+                }
+                // 动态权重换玩法时，把对应的参数块显出来（关闭时全部变灰）。
+                if (target.dataset.itemField === 'fatigue.mode') {
+                    const on = value && value !== 'off';
+                    row.querySelectorAll('.se-fatigue-decay').forEach((el) => el.toggleAttribute('hidden', value !== 'decay'));
+                    row.querySelectorAll('.se-fatigue-boost').forEach((el) => el.toggleAttribute('hidden', value !== 'boost'));
+                    row.querySelectorAll('[data-item-field^="fatigue."]').forEach((el) => {
+                        if (el.dataset.itemField !== 'fatigue.mode') {
+                            el.disabled = !on;
+                        }
+                    });
+                    const summary = row.querySelector('.se-fatigue-block > summary');
+                    if (summary) {
+                        const item = getStore()?.decks.find((d) => d.id === deckId)?.items.find((i) => i.id === row.dataset.item);
+                        summary.textContent = `动态权重：${fatigueLabel(item?.fatigue)}`;
+                    }
                 }
             }
         } else if (target.dataset.requireRef || target.dataset.excludeRef) {

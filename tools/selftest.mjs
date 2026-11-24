@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, effectiveWeight, applyFatigueOnHit, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 import { buildDirectorPrompt } from '../src/inject.js';
 
@@ -1006,6 +1006,77 @@ test('条目自己的持续时长优先于合集设置', () => {
     assert.equal(deckState(state, deck.id).hold.turns, 1);
     state.turn = 11;
     assert.equal(expireIfDue(state, deck), true);
+});
+
+
+section('动态权重');
+function fatigueDeck(extra = {}) {
+    return {
+        id: 'fat-1',
+        name: '权重柜',
+        cooldown: 0,
+        pick: 1,
+        items: [
+            { id: 'a', name: 'A', text: 'A', weight: 1, fatigue: { mode: 'decay', everyTurns: 3, amount: 10, ratio: false, floorPercent: 1, recoverTurns: 5, maxPercent: 300 } },
+            { id: 'b', name: 'B', text: 'B', weight: 1, fatigue: { mode: 'boost', everyTurns: 2, amount: 20, ratio: false, floorPercent: 1, recoverTurns: 5, maxPercent: 300 } },
+        ],
+        ...extra,
+    };
+}
+
+test('降权：连续抽中会累计往下掉', () => {
+    const deck = fatigueDeck();
+    const state = createState('fat-seed', 1);
+    const ds = deckState(state, 'fat-1');
+    ds.fatigue = {};
+    const item = deck.items[0];
+    state.turn = 1;
+    applyFatigueOnHit(state, deck, [item]);
+    assert.equal(Math.round(effectiveWeight(state, deck, item, ds, 2) * 100), 90);
+    state.turn = 2;
+    applyFatigueOnHit(state, deck, [item]);
+    assert.equal(Math.round(effectiveWeight(state, deck, item, ds, 3) * 100), 80);
+});
+
+test('降权：掉到下限以下进冷却，冷却结束回到 100%', () => {
+    const deck = fatigueDeck();
+    const state = createState('fat-seed-2', 1);
+    const ds = deckState(state, 'fat-1');
+    ds.fatigue = {};
+    const item = deck.items[0];
+    ds.fatigue[item.id] = { mult: 0.005, lastHit: 1, cooledUntil: -1 };
+    state.turn = 2;
+    applyFatigueOnHit(state, deck, [item]);
+    assert.ok(Number(ds.fatigue[item.id].cooledUntil) > 2);
+    assert.equal(effectiveWeight(state, deck, item, ds, 3), 0);
+    assert.equal(effectiveWeight(state, deck, item, ds, 99), 1);
+});
+
+test('增权：隔几轮没抽中就往上加，抽中后回到 100%', () => {
+    const deck = fatigueDeck();
+    const state = createState('fat-seed-3', 1);
+    const ds = deckState(state, 'fat-1');
+    ds.fatigue = {};
+    const item = deck.items[1];
+    state.turn = 1;
+    applyFatigueOnHit(state, deck, [item]);
+    assert.equal(Math.round(effectiveWeight(state, deck, item, ds, 3) * 100), 120);
+    assert.equal(Math.round(effectiveWeight(state, deck, item, ds, 5) * 100), 140);
+    state.turn = 6;
+    applyFatigueOnHit(state, deck, [item]);
+    assert.equal(Math.round(effectiveWeight(state, deck, item, ds, 7) * 100), 100);
+});
+
+test('动态权重会乘到实际抽签权重上', () => {
+    const deck = fatigueDeck();
+    const state = createState('fat-seed-4', 1);
+    const ds = deckState(state, 'fat-1');
+    ds.fatigue = {};
+    state.turn = 5;
+    ds.fatigue.a = { mult: 0.1, lastHit: 1, cooledUntil: -1 };
+    const pool = availableItems(state, deck);
+    const a = pool.find((item) => item.id === 'a');
+    assert.equal(Math.round(a.weight * 100), 10);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
