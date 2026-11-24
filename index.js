@@ -907,35 +907,59 @@ function publishDeckToGlobal(deckId) {
         toast('error', '先在左栏选一个合集');
         return;
     }
-    const snapshot = normalizeDeckShape(JSON.parse(JSON.stringify(deck)));
-    const list = globalDecks().filter((item) => item?.id !== snapshot.id);
-    list.push(snapshot);
+    const family = [deck, ...descendantDecks(store.decks, deck.id)];
+    const snapshots = family.map((item) => normalizeDeckShape(JSON.parse(JSON.stringify(item))));
+    const ids = new Set(snapshots.map((snapshot) => snapshot.id));
+    const list = globalDecks().filter((item) => !ids.has(item?.id));
+    list.push(...snapshots);
     saveGlobalDecks(list);
     renderGlobalBlock();
-    toast('success', `「${snapshot.name || snapshot.id}」已发布到公共库（${snapshot.items?.length || 0} 条）`);
+    const extra = snapshots.length - 1;
+    toast('success', extra > 0
+        ? `「${deck.name}」和它的 ${extra} 个子合集已发布到公共库`
+        : `「${snapshotName(snapshots[0])}」已发布到公共库（${snapshots[0].items?.length || 0} 条）`);
+}
+
+function snapshotName(deck) {
+    return deck?.name || deck?.id || '合集';
 }
 
 /** 把公共库里的合集复制一份到当前聊天，id 冲突时自动改名。 */
 function copyGlobalToChat(globalId) {
-    const source = globalDecks().find((item) => item?.id === globalId);
+    const all = globalDecks();
+    const source = all.find((item) => item?.id === globalId);
     const store = getStore({ create: true });
     if (!source || !store) {
         toast('error', '先打开一个聊天');
         return;
     }
-    const deck = normalizeDeckShape(JSON.parse(JSON.stringify(source)));
-    const base = deck.id || 'deck';
-    let nextId = base;
-    let n = 2;
-    while (store.decks.some((item) => item.id === nextId)) {
-        nextId = `${base}-${n}`;
-        n += 1;
+    const group = [source, ...descendantDecks(all, source.id)];
+    const idMap = new Map();
+    const used = new Set(store.decks.map((item) => item.id));
+    for (const item of group) {
+        const base = item.id || 'deck';
+        let nextId = base;
+        let n = 2;
+        while (used.has(nextId)) {
+            nextId = `${base}-${n}`;
+            n += 1;
+        }
+        used.add(nextId);
+        idMap.set(item.id, nextId);
     }
-    deck.id = nextId;
-    if (nextId !== base) {
-        deck.name = `${deck.name || base}（副本）`;
-    }
-    store.decks.push(deck);
+    const copies = group.map((item) => {
+        const deck = normalizeDeckShape(JSON.parse(JSON.stringify(item)));
+        const originalId = deck.id;
+        deck.id = idMap.get(originalId);
+        if (deck.id !== originalId) {
+            deck.name = `${deck.name || originalId}（副本）`;
+        }
+        if (deck.parent) {
+            deck.parent = idMap.get(deck.parent) || deck.parent;
+        }
+        return deck;
+    });
+    store.decks.push(...copies);
     selectedDeckId = deck.id;
     saveStore({ immediate: true });
     refreshInjections();
@@ -958,14 +982,21 @@ function renderGlobalBlock() {
         list.innerHTML = '<p class="se-muted">公共库是空的。选中一个合集后点「把当前合集发布到公共库」，以后任何聊天都能一键复制。</p>';
         return;
     }
-    list.innerHTML = decks.map((deck) => `
+    list.innerHTML = decks.map((deck) => {
+        const childCount = decks.filter((item) => item && item.parent === deck.id).length;
+        const parts = [`${(deck.items || []).length} 条`];
+        if (childCount > 0) {
+            parts.push(`${childCount} 个子合集`);
+        }
+        return `
         <div class="se-global-row">
             <span class="se-global-name">${escapeHtml(deck.name || deck.id)}</span>
-            <span class="se-global-count">${(deck.items || []).length} 条</span>
+            <span class="se-global-count">${parts.join(' · ')}</span>
             <button type="button" class="menu_button" data-action="copy-global" data-deck="${escapeHtml(deck.id)}">复制到本聊天</button>
             <button type="button" class="menu_button" data-action="delete-global" data-deck="${escapeHtml(deck.id)}">移出公共库</button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 async function importGlobalFiles(files) {
