@@ -3590,6 +3590,9 @@ function bindPanelEvents() {
                             el.disabled = !on;
                         }
                     });
+                }
+                // 动态权重的摘要要跟着参数走：改幅度/间隔/上限，摘要立刻重算。
+                if (String(target.dataset.itemField || '').startsWith('fatigue.')) {
                     const summary = row.querySelector('.se-fatigue-block > summary');
                     if (summary) {
                         const item = getStore()?.decks.find((d) => d.id === deckId)?.items.find((i) => i.id === row.dataset.item);
