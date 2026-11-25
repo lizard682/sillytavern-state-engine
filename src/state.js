@@ -635,10 +635,15 @@ export function drawDeckTree(state, decks, deckId, options = {}) {
         maxDepth = 3,
         depth = 0,
         visited = new Set(),
+        ignoreHold = false,
     } = options;
     const deck = (decks || []).find((item) => item && item.id === deckId);
     if (!deck || visited.has(deckId) || depth > maxDepth) {
         return { ok: false, nested: false, deck: deck || null, parentDeck: null, result: null, reason: 'invalid' };
+    }
+    // 当前内容还在持续期里，就不抽下一轮（手动重抽/立即判断会传 ignoreHold 绕过）。
+    if (!ignoreHold && holdActive(state, deck)) {
+        return { ok: false, nested: false, deck, parentDeck: null, result: null, reason: 'holding' };
     }
     const nextVisited = new Set(visited);
     nextVisited.add(deckId);
@@ -771,6 +776,43 @@ export function expireIfDue(state, deck) {
         note: `持续 ${turns} 轮到期：${dropped.join('、')}`,
     });
     return true;
+}
+
+/**
+ * 当前抽中的内容是不是还在「持续」里（按轮数/按天数，且还没到期）。
+ * 还在持续时，自动抽取要跳过这个合集；手动重抽、立即判断不受限制。
+ * forever / ai 不阻塞，否则自动抽取会永远卡住。
+ */
+export function holdActive(state, deck) {
+    const ds = deckState(state, deck.id);
+    if (!Array.isArray(ds.current) || ds.current.length === 0) {
+        return false;
+    }
+    const hold = ds.hold || null;
+    if (!hold) {
+        return false;
+    }
+    if (hold.mode === 'turns') {
+        const start = Number(ds.holdStart);
+        const turns = Math.max(1, Number(hold.turns) || 1);
+        if (!Number.isFinite(start) || start < 0) {
+            return false;
+        }
+        return Number(state.turn) - start < turns;
+    }
+    if (hold.mode === 'days') {
+        const start = Number(ds.holdStartDay);
+        const days = Math.max(1, Number(hold.days) || 1);
+        if (!Number.isFinite(start) || start < 0) {
+            return false;
+        }
+        const nowDay = Number(state.gameDay);
+        if (!Number.isFinite(nowDay)) {
+            return false;
+        }
+        return nowDay - start < days;
+    }
+    return false;
 }
 
 /** 模型主动结束（mode='ai' 时用 <!--SE-END:合集id--> 触发）。 */

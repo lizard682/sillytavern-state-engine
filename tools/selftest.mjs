@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, effectiveWeight, applyFatigueOnHit, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, holdActive, effectiveWeight, applyFatigueOnHit, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 import { buildDirectorPrompt } from '../src/inject.js';
 
@@ -1077,6 +1077,46 @@ test('动态权重会乘到实际抽签权重上', () => {
     const pool = availableItems(state, deck);
     const a = pool.find((item) => item.id === 'a');
     assert.equal(Math.round(a.weight * 100), 10);
+});
+
+
+section('持续期内不再抽下一次');
+test('内容还在持续里时，自动抽取会被挡住', () => {
+    const deck = {
+        id: 'hold-a',
+        name: '持续柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1, hold: { mode: 'turns', turns: 3 } }],
+    };
+    const state = createState('hold-seed', 10);
+    const first = drawDeckTree(state, [deck], 'hold-a', { force: true });
+    assert.equal(first.ok, true);
+    assert.equal(holdActive(state, deck), true);
+    state.turn = 11;
+    const blocked = drawDeckTree(state, [deck], 'hold-a', {});
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.reason, 'holding');
+    const forced = drawDeckTree(state, [deck], 'hold-a', { ignoreHold: true, force: true });
+    assert.equal(forced.ok, true);
+});
+
+test('持续结束（按轮数到期）之后可以再抽', () => {
+    const deck = {
+        id: 'hold-b',
+        name: '持续柜二',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1, hold: { mode: 'turns', turns: 1 } }],
+    };
+    const state = createState('hold-seed-2', 20);
+    drawDeckTree(state, [deck], 'hold-b', { force: true });
+    assert.equal(holdActive(state, deck), true);
+    state.turn = 21;
+    expireIfDue(state, deck);
+    assert.equal(holdActive(state, deck), false);
+    const again = drawDeckTree(state, [deck], 'hold-b', {});
+    assert.equal(again.ok, true);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

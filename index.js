@@ -53,6 +53,7 @@ import {
     endHold,
     expireIfDue,
     hasCurrent,
+    holdActive,
     itemRef,
     resetDeckState,
     syncTurn,
@@ -1766,6 +1767,10 @@ function applySummons(store, ctx, seededIds) {
                 if (deckExhausted(store.state, store.decks, deck.id)) {
                     continue;
                 }
+                // 当前内容还在持续期里，就别把它换掉。
+                if (holdActive(store.state, deck)) {
+                    continue;
+                }
                 // 只认上级合集的子合集，不参与「被唤起」。
                 if (deck.onlyFromParent === true) {
                     continue;
@@ -1809,6 +1814,7 @@ function drawOne(deckId, { reroll = false } = {}) {
     const tree = drawDeckTree(store.state, store.decks, deckId, {
         force: true,
         cause: reroll ? 'reroll' : 'manual',
+        ignoreHold: true,
     });
     const result = tree.result || null;
     // 手动抽也算一次「抽中」，把「被它唤起」的合集顺带抽出来。
@@ -2103,7 +2109,7 @@ async function judgeNow() {
             if (!deck) {
                 continue;
             }
-            const tree = drawDeckTree(store.state, store.decks, deck.id, { force: true, cause: 'ai' });
+            const tree = drawDeckTree(store.state, store.decks, deck.id, { force: true, cause: 'ai', ignoreHold: true });
             if (tree.result?.changed) {
                 fired += 1;
             }
@@ -2726,7 +2732,7 @@ function renderItems(deck, store) {
                 <label class="se-field se-item-hold-mode">
                     <span>这条自己的持续</span>
                     <select class="text_pole" data-item-field="hold.mode">
-                        <option value="" ${item.hold ? '' : 'selected'}>跟随合集（${holdLabel(deck.hold)}）</option>
+                        <option value="" ${item.hold ? '' : 'selected'}>不设（一直保留到下次抽中）</option>
                         <option value="turns" ${item.hold?.mode === 'turns' ? 'selected' : ''}>按轮数</option>
                         <option value="days" ${item.hold?.mode === 'days' ? 'selected' : ''}>按游戏内天数</option>
                         <option value="forever" ${item.hold?.mode === 'forever' ? 'selected' : ''}>一直保留</option>
@@ -3010,27 +3016,7 @@ function renderEditor(store) {
         <div class="se-section-title">不可打断</div>
         <label class="se-checks se-check-wide"><input type="checkbox" data-deck-field="lock" ${deck.lock ? 'checked' : ''}><span>开着时只抽它：同一层的其它合集暂时休眠，直到它抽无可抽</span></label>
 
-        <div class="se-section-title">抽中的内容持续多久</div>
-        <div class="se-form se-hold-form">
-            <label class="se-field">
-                <span>方式</span>
-                <select class="text_pole" data-deck-field="hold.mode">
-                    <option value="turns" ${hold.mode === 'turns' ? 'selected' : ''}>按轮数</option>
-                    <option value="days" ${hold.mode === 'days' ? 'selected' : ''}>按游戏内天数</option>
-                    <option value="forever" ${hold.mode === 'forever' ? 'selected' : ''}>永久（直到重抽或清空）</option>
-                    <option value="ai" ${hold.mode === 'ai' ? 'selected' : ''}>由 AI 判断结束</option>
-                </select>
-            </label>
-            <label class="se-field" ${hold.mode === 'turns' ? '' : 'hidden'}>
-                <span>持续轮数</span>
-                <input type="number" class="text_pole" data-deck-field="hold.turns" min="1" step="1" value="${Number(hold.turns) || 1}">
-            </label>
-            <label class="se-field" ${hold.mode === 'days' ? '' : 'hidden'}>
-                <span>持续天数</span>
-                <input type="number" class="text_pole" data-deck-field="hold.days" min="1" step="1" value="${Number(hold.days) || 1}">
-            </label>
-        </div>
-        <div class="se-hint">按轮数时，抽中那一轮算第 1 轮；按天数时以卡里的 MVU 日期为准，抽中那天算第 1 天，卡里没有日期就不计时。选「由 AI 判断结束」时，模型可以在回复里写 &lt;!--SE-END:${deck.id}--&gt; 主动结束。</div>
+        <div class="se-hint">持续的时长改成由「条目自己」决定了：展开任意条目，在最下面的「这条自己的持续」里设。内容还在持续期里时，这个合集不会被自动抽到下一次（手动「抽一条」或「重抽」不受限制）。</div>
 
         <div class="se-section-title">注入到哪</div>
         <div class="se-form se-inject-form">
