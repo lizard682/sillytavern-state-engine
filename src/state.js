@@ -43,6 +43,7 @@ export function captureFrame(state) {
         decks[id] = {
             current: Array.isArray(ds?.current) ? [...ds.current] : [],
             used: ds?.used === true,
+            hold: ds?.hold ? { ...ds.hold } : null,
             holdStart: Number.isFinite(Number(ds?.holdStart)) ? Number(ds.holdStart) : -1,
             holdStartDay: Number.isFinite(Number(ds?.holdStartDay)) ? Number(ds.holdStartDay) : -1,
             itemTurns: { ...(ds?.itemTurns || {}) },
@@ -81,6 +82,9 @@ export function restoreFrame(state, targetTurn) {
         const ds = deckState(state, id);
         ds.current = Array.isArray(snap.current) ? [...snap.current] : [];
         ds.used = snap.used === true;
+        // 持续时长是「抽中那一条」自己的设置，回退时必须一起复原，
+        // 否则会掉到合集默认值上，看起来就像条目的独立判定被合集覆盖了。
+        ds.hold = snap.hold ? { ...snap.hold } : null;
         ds.holdStart = Number.isFinite(Number(snap.holdStart)) ? Number(snap.holdStart) : -1;
         ds.holdStartDay = Number.isFinite(Number(snap.holdStartDay)) ? Number(snap.holdStartDay) : -1;
         ds.itemTurns = { ...(snap.itemTurns || {}) };

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_SCHEMA } from '../src/pack.js';
-import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, holdActive, effectiveWeight, applyFatigueOnHit, captureFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
+import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, holdActive, effectiveWeight, applyFatigueOnHit, captureFrame, restoreFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 import { buildDirectorPrompt } from '../src/inject.js';
 
@@ -1142,6 +1142,30 @@ test('由 AI 结束的条目，没收到结束标记时不会被换掉', () => {
     assert.equal(holdActive(state, deck), false);
     const again = drawDeckTree(state, [deck], 'aihold-a', {});
     assert.equal(again.ok, true);
+});
+
+
+section('回退保留条目自己的持续设置');
+test('删楼回退后，条目自己的持续设置跟着回来', () => {
+    const deck = {
+        id: 'frame-a',
+        name: '回退柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1, hold: { mode: 'turns', turns: 3 } }],
+    };
+    const state = createState('frame-seed', 10);
+    drawDeckTree(state, [deck], 'frame-a', { force: true });
+    const ds = deckState(state, 'frame-a');
+    assert.deepEqual(ds.hold, { mode: 'turns', turns: 3 });
+    captureFrame(state);
+    // 模拟下一楼抽中别的、持续设置被改写
+    ds.hold = null;
+    ds.current = [];
+    state.turn = 11;
+    restoreFrame(state, 10);
+    assert.deepEqual(ds.hold, { mode: 'turns', turns: 3 });
+    assert.deepEqual(ds.current, ['a']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
