@@ -302,7 +302,7 @@ export function normalizeFatigue(raw) {
 export function normalizeItem(raw, index = 0) {
     if (typeof raw === 'string') {
         const text = raw.trim();
-        return { id: `item-${index + 1}`, name: text, text, weight: 1, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null, hold: null, fatigue: null };
+        return { id: `item-${index + 1}`, name: text, text, weight: 1, enabled: true, once: false, initial: false, requires: [], excludes: [], excludeSiblings: false, cooldown: null, hold: null, fatigue: null };
     }
     if (!isPlainObject(raw)) {
         return null;
@@ -316,6 +316,8 @@ export function normalizeItem(raw, index = 0) {
         id,
         name,
         text: asString(raw.text) || name,
+        // 启用开关：关掉的条目不参与抽签，但留在清单里。
+        enabled: raw.enabled !== false,
         // 出现概率：相对权重，默认 1；0 表示这一条永不出现（但保留在清单里）。
         weight: Number.isFinite(Number(raw.weight)) ? Math.max(0, Number(raw.weight)) : 1,
         // 只出现一次：抽中后写进进度，之后不再进候选池。
@@ -444,6 +446,7 @@ export function serializePack(pack) {
             ...(item.initial ? { initial: true } : {}),
             ...(Array.isArray(item.requires) && item.requires.length ? { requires: item.requires.slice() } : {}),
             ...(Array.isArray(item.excludes) && item.excludes.length ? { excludes: item.excludes.slice() } : {}),
+            ...(item.enabled === false ? { enabled: false } : {}),
             ...(item.excludeSiblings === true ? { excludeSiblings: true } : {}),
             ...(Number.isFinite(Number(item.cooldown)) && item.cooldown !== null ? { cooldown: item.cooldown } : {}),
             ...(isPlainObject(item.hold) ? { hold: normalizeHold(item.hold) } : {}),

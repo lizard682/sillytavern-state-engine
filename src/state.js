@@ -524,6 +524,10 @@ export function availableItems(state, deck) {
     const turn = Number(state.turn) || 0;
     const itemTurns = ds.itemTurns && typeof ds.itemTurns === 'object' ? ds.itemTurns : {};
     const kept = deck.items.filter((item) => {
+        // 条目自己的启用开关：关掉的不参与抽签。
+        if (item.enabled === false) {
+            return false;
+        }
         if (excluded.has(item.id)) {
             return false;
         }

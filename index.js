@@ -227,6 +227,7 @@ function normalizeDeckShape(deck) {
             } else {
                 item.excludes = normalizeExcludes(item.excludes);
             }
+            item.enabled = item.enabled !== false;
             item.excludeSiblings = item.excludeSiblings === true;
             item.initial = item.initial === true;
             const ownCooldown = Number(item.cooldown);
@@ -986,11 +987,11 @@ function copyGlobalToChat(globalId) {
         return deck;
     });
     store.decks.push(...copies);
-    selectedDeckId = deck.id;
+    selectedDeckId = copies[0]?.id || source.id;
     saveStore({ immediate: true });
     refreshInjections();
     renderPanel();
-    toast('success', `已把「${deck.name || deck.id}」复制到当前聊天`);
+    toast('success', `已把「${copies[0]?.name || source.name || source.id}」复制到当前聊天（${copies[0]?.items?.length || 0} 条）`);
 }
 
 function removeGlobalDeck(globalId) {
@@ -2581,11 +2582,14 @@ function renderSidebar(store) {
         const badge = deck.lock === true ? '<span class="se-deck-count se-deck-lock" title="不可打断：自动抽取只抽它">锁</span>'
             : (empty ? '<span class="se-deck-count se-deck-empty" title="没有可抽的条目了">空</span>' : '');
         return `
-        <button type="button" class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
+        <div class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''} ${deck.enabled === false ? 'se-deck-off' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
+            <label class="se-deck-toggle" title="启用 / 停用这个合集">
+                <input type="checkbox" data-deck-enabled="${escapeHtml(deck.id)}" ${deck.enabled === false ? '' : 'checked'}>
+            </label>
             <span class="se-deck-item-name">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}${badge}</span>
             <span class="se-deck-item-meta">${escapeHtml(deck.binding?.name || triggerSummary(deck))}</span>
             <span class="se-deck-item-value">${escapeHtml(currentLabel(deck, store))}</span>
-        </button>`;
+        </div>`;
     }).join('');
 }
 
@@ -2691,8 +2695,11 @@ function renderItems(deck, store) {
             avoidCount ? `互斥 ${avoidCount}` : '',
         ].filter(Boolean).join(' · ');
         return `
-        <div class="se-item-row" data-item="${escapeHtml(item.id)}">
+        <div class="se-item-row ${item.enabled === false ? 'se-item-off' : ''}" data-item="${escapeHtml(item.id)}">
             <div class="se-item-main" data-action="toggle-item">
+                <label class="se-item-toggle" title="启用 / 停用这条（停用后不参与抽签，内容保留）">
+                    <input type="checkbox" data-item-enabled="${escapeHtml(item.id)}" ${item.enabled === false ? '' : 'checked'}>
+                </label>
                 <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
                 <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="10" value="${weightPercent}" title="出现概率：100% 是基准；填 0 表示永不出现。填 200% 就是基准的两倍。">
                 <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
@@ -3681,6 +3688,24 @@ function bindPanelEvents() {
                 .filter((el) => el.checked)
                 .map((el) => el.dataset.scanField);
             setDeckField(deckId, 'scan.fields', fields);
+        } else if (target.dataset.itemEnabled) {
+            const row = target.closest('.se-item-row');
+            const checked = target.checked;
+            setItemField(deckId, target.dataset.itemEnabled, 'enabled', checked);
+            row?.classList.toggle('se-item-off', !checked);
+            const store = getStore();
+            const deck = store?.decks.find((d) => d.id === deckId);
+            const item = deck?.items.find((i) => i.id === target.dataset.itemEnabled);
+            if (item) {
+                item.enabled = checked;
+            }
+            refreshInjections();
+        } else if (target.dataset.deckEnabled) {
+            const id = target.dataset.deckEnabled;
+            const checked = target.checked;
+            setDeckField(id, 'enabled', checked);
+            target.closest('.se-deck-item')?.classList.toggle('se-deck-off', !checked);
+            refreshInjections();
         } else if (target.dataset.itemField) {
             const row = target.closest('.se-item-row');
             if (row?.dataset.item) {
