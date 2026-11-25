@@ -82,7 +82,7 @@ let context;
 /** 时间提示的默认模板：{{time}} 现在的时间，{{paths}} 要改的变量路径，{{example}} 一条示例。 */
 const DEFAULT_TIME_TEMPLATE = [
     '【时间】现在是 {{time}}。',
-    '如果这一轮剧情确实跨到了新的一天，请照这张卡已有的变量更新格式把这几个值一起改掉：',
+    '如果这一轮剧情确实跨到了新的一天，请把时间和日期一起改掉（用这张卡本来改变量的写法）：',
     '{{paths}}',
     '{{example}}',
     '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
@@ -1378,7 +1378,19 @@ function buildTimeHint(ctx) {
             ? `- ${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气`
             : '';
     const example = style === 'patch'
-        ? `示例：{"op":"replace","path":"/${MVU_TIME_KEY}/日期","value":"第 2 天"}`
+        ? [
+            '照下面这个块写，三条一起放进同一个 JSONPatch（值按剧情改）：',
+            '<UpdateVariable>',
+            '<Analysis>跨到了新的一天，把日期和时间一起推进。</Analysis>',
+            '<JSONPatch>',
+            '[',
+            `  {"op":"replace","path":"/${MVU_TIME_KEY}/日期","value":"第 2 天"},`,
+            `  {"op":"replace","path":"/${MVU_TIME_KEY}/时间","value":"清晨"},`,
+            `  {"op":"replace","path":"/${MVU_TIME_KEY}/天气","value":"晴"}`,
+            ']',
+            '</JSONPatch>',
+            '</UpdateVariable>',
+        ].join('\n')
         : '';
     const template = String(settings.timeTemplate || DEFAULT_TIME_TEMPLATE);
     const lines = [];
