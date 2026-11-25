@@ -498,6 +498,29 @@
     border-radius: 6px;
 }
 
+/* 拖动排序：被拖的那一项变淡，落点用一条强调色横线标出来。 */
+#state-engine-panel .se-dragging {
+    opacity: 0.45;
+}
+
+#state-engine-panel .se-drop-before {
+    box-shadow: inset 0 2px 0 var(--SmartThemeQuoteColor, #d9a94a);
+}
+
+#state-engine-panel .se-drop-after {
+    box-shadow: inset 0 -2px 0 var(--SmartThemeQuoteColor, #d9a94a);
+}
+
+#state-engine-panel .se-deck-item,
+#state-engine-panel .se-item-name-view {
+    cursor: grab;
+}
+
+#state-engine-panel .se-deck-item:active,
+#state-engine-panel .se-item-name-view:active {
+    cursor: grabbing;
+}
+
 #state-engine-panel .se-item-main {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) 58px 24px;

@@ -2640,7 +2640,7 @@ function renderSidebar(store) {
         const badge = deck.lock === true ? '<span class="se-deck-count se-deck-lock" title="不可打断：自动抽取只抽它">锁</span>'
             : (empty ? '<span class="se-deck-count se-deck-empty" title="没有可抽的条目了">空</span>' : '');
         return `
-        <div class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''} ${deck.enabled === false ? 'se-deck-off' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" style="padding-left:${10 + depth * 16}px">
+        <div class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''} ${deck.enabled === false ? 'se-deck-off' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" draggable="true" title="拖动可以调整同层顺序" style="padding-left:${10 + depth * 16}px">
             <label class="se-deck-toggle" title="启用 / 停用这个合集">
                 <input type="checkbox" data-deck-enabled="${escapeHtml(deck.id)}" ${deck.enabled === false ? '' : 'checked'}>
             </label>
@@ -2753,7 +2753,7 @@ function renderItems(deck, store) {
             avoidCount ? `互斥 ${avoidCount}` : '',
         ].filter(Boolean).join(' · ');
         return `
-        <div class="se-item-row ${item.enabled === false ? 'se-item-off' : ''}" data-item="${escapeHtml(item.id)}">
+        <div class="se-item-row ${item.enabled === false ? 'se-item-off' : ''}" data-item="${escapeHtml(item.id)}" draggable="true">
             <div class="se-item-main" data-action="toggle-item">
                 <label class="se-item-toggle" title="启用 / 停用这条（停用后不参与抽签，内容保留）">
                     <input type="checkbox" data-item-enabled="${escapeHtml(item.id)}" ${item.enabled === false ? '' : 'checked'}>
@@ -3457,11 +3457,134 @@ function togglePanel(forceOpen) {
     }
 }
 
+/**
+ * 拖动排序：侧栏合集只能在「同一层」内换位置；条目按当前合集内的顺序换。
+ */
+function applyReorder(kind, fromId, toId, after) {
+    const store = getStore();
+    if (!store || !fromId || !toId || fromId === toId) {
+        return false;
+    }
+    if (kind === 'deck') {
+        const fromDeck = store.decks.find((item) => item.id === fromId);
+        const toDeck = store.decks.find((item) => item.id === toId);
+        if (!fromDeck || !toDeck) {
+            return false;
+        }
+        if (String(fromDeck.parent || '') !== String(toDeck.parent || '')) {
+            toast('info', '合集只能在「同一层」内拖动排序；换层级请用「上级合集」。');
+            return false;
+        }
+        const from = store.decks.indexOf(fromDeck);
+        const to = store.decks.indexOf(toDeck);
+        store.decks.splice(from, 1);
+        const insert = (from < to ? to - 1 : to) + (after ? 1 : 0);
+        store.decks.splice(Math.max(0, Math.min(insert, store.decks.length)), 0, fromDeck);
+    } else {
+        const deck = store.decks.find((item) => item.id === selectedDeckId);
+        if (!deck || !Array.isArray(deck.items)) {
+            return false;
+        }
+        const from = deck.items.findIndex((item) => item.id === fromId);
+        const to = deck.items.findIndex((item) => item.id === toId);
+        if (from < 0 || to < 0) {
+            return false;
+        }
+        const [moved] = deck.items.splice(from, 1);
+        const insert = (from < to ? to - 1 : to) + (after ? 1 : 0);
+        deck.items.splice(Math.max(0, Math.min(insert, deck.items.length)), 0, moved);
+    }
+    saveStore({ immediate: true });
+    renderPanel();
+    return true;
+}
+
+/**
+ * 面板上的拖动排序（原生 HTML5 drag & drop）。
+ */
+function setupDragSort(root) {
+    if (!root || setupDragSort.done) {
+        return;
+    }
+    setupDragSort.done = true;
+    let kind = '';
+    let dragId = '';
+    const selectorOf = (targetKind) => (targetKind === 'deck' ? '#se-deck-list .se-deck-item' : '#se-editor .se-item-row');
+    const clearMarks = () => {
+        root.querySelectorAll('.se-dragging, .se-drop-before, .se-drop-after').forEach((el) => {
+            el.classList.remove('se-dragging', 'se-drop-before', 'se-drop-after');
+        });
+    };
+    root.addEventListener('dragstart', (event) => {
+        // 在输入框里拖选文字时不要触发排序。
+        if (event.target.closest('input, textarea, select')) {
+            event.preventDefault();
+            return;
+        }
+        const deckEl = event.target.closest('#se-deck-list .se-deck-item');
+        const itemEl = event.target.closest('#se-editor .se-item-row');
+        const el = deckEl || itemEl;
+        if (!el) {
+            return;
+        }
+        kind = deckEl ? 'deck' : 'item';
+        dragId = deckEl ? deckEl.dataset.deck : itemEl.dataset.item;
+        clearMarks();
+        el.classList.add('se-dragging');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', dragId);
+    });
+    root.addEventListener('dragover', (event) => {
+        if (!kind) {
+            return;
+        }
+        const target = event.target.closest(selectorOf(kind));
+        if (!target) {
+            return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        clearMarks();
+        const rect = target.getBoundingClientRect();
+        const after = event.clientY - rect.top > rect.height / 2;
+        target.classList.add(after ? 'se-drop-after' : 'se-drop-before');
+    });
+    root.addEventListener('drop', (event) => {
+        if (!kind) {
+            return;
+        }
+        const target = event.target.closest(selectorOf(kind));
+        if (!target) {
+            clearMarks();
+            kind = '';
+            dragId = '';
+            return;
+        }
+        event.preventDefault();
+        const targetId = kind === 'deck' ? target.dataset.deck : target.dataset.item;
+        const rect = target.getBoundingClientRect();
+        const after = event.clientY - rect.top > rect.height / 2;
+        clearMarks();
+        const moved = applyReorder(kind, dragId, targetId, after);
+        if (!moved) {
+            clearMarks();
+        }
+        kind = '';
+        dragId = '';
+    });
+    root.addEventListener('dragend', () => {
+        clearMarks();
+        kind = '';
+        dragId = '';
+    });
+}
+
 function bindPanelEvents() {
     const root = document.getElementById(PANEL_ID);
     if (!root) {
         return;
     }
+    setupDragSort(root);
 
     root.querySelector('#se-enabled')?.addEventListener('change', (event) => {
         settings.enabled = !!event.target.checked;
