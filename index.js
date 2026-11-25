@@ -1335,6 +1335,11 @@ function currentDateText(ctx) {
  */
 /** 看这张卡本来用什么方式改变量，时间提示才能给出对得上的写法。 */
 function mvuUpdateStyle(ctx) {
+    // 最可靠的证据：变量已经建出来了（说明 MVU 正在跑），直接按 MVU 的写法给。
+    const stats = ctx?.chatMetadata?.variables?.stat_data;
+    if (stats && typeof stats === 'object' && Object.keys(stats).length > 0) {
+        return 'patch';
+    }
     const char = currentCharacterCard();
     const bag = [];
     if (char) {
