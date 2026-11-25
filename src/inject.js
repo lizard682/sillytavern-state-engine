@@ -68,7 +68,7 @@ export function clearInjections(ctx, decks = []) {
     ctx.setExtensionPrompt(DIRECTOR_KEY, '', PROMPT_POSITION.chat, 0, false, PROMPT_ROLE.system);
 }
 
-/** 默认的 AI 判定说明（可以在面板里改）。 */
+/** 默认的 AI 判定说明（可以在面板里改）。清单由代码统一追加在最后，模板里不用再写。 */
 export const DEFAULT_AI_TEMPLATE = [
     '你可以在剧情自然需要时申请获取清单的指导。先在心里过一遍：',
     '1. 观察：这一轮发生在什么场景？角色正在做什么？我收到的清单可以调用什么？',
@@ -76,9 +76,6 @@ export const DEFAULT_AI_TEMPLATE = [
     '3. 克制：依据收到的清单类型进行申请；同一件事不要连续两轮申请。',
     '决定申请时，首先要停下当前合集的状态，在回复的最后单独一行输出标记，格式：<!--SE-END:合集id-->，然后申请新状态，在回复的最后单独一行输出标记，格式：<!--SE:合集id-->',
     '停止和申请的标记要一同输出，只输出标记本身，不需要解释，也不需要重复清单内容。',
-    '',
-    '可以申请的清单如下：',
-    '{{decks}}',
 ].join('\n');
 
 /**
@@ -149,6 +146,8 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
         const items = Array.isArray(itemsByDeck[deck.id]) ? itemsByDeck[deck.id] : [];
         const cur = currentNames(deck.id);
         const { pending, locked } = splitPending(deck, items);
+        // 挂在它下面的支线：把每条支线当前停在哪、后面还有哪几幕告诉模型。
+        const children = decks.filter((item) => item.parent === deck.id && item.enabled !== false);
         // 合集可以选「只给 AI 合集名」，不把里面有什么条目告诉它。
         const hideItems = deck.reveal === 'deck';
         const parts = [];
@@ -157,17 +156,16 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
         }
         if (!hideItems && pending.length) {
             const more = pending.length > 12 ? '…' : '';
-            parts.push(`现在可以抽：${pending.slice(0, 12).join('、')}${more}`);
+            parts.push(`可申请：${pending.slice(0, 12).join('、')}${more}`);
         }
         if (!hideItems && locked.length) {
             const more = locked.length > 6 ? '…' : '';
             parts.push(`还没解锁：${locked.slice(0, 6).join('、')}${more}`);
         }
-        if (!cur.length && !pending.length && !locked.length && items.length === 0) {
-            parts.push('（这份清单还没有条目）');
+        // 纯容器合集（自己没条目、只有支线）不写「空清单」，免得模型以为它没用。
+        if (!cur.length && !pending.length && !locked.length && items.length === 0 && children.length === 0) {
+            parts.push('（空清单）');
         }
-        // 挂在它下面的支线：把每条支线当前停在哪、后面还有哪几幕告诉模型。
-        const children = decks.filter((item) => item.parent === deck.id && item.enabled !== false);
         if (children.length > 0) {
             const childLines = children.map((child) => {
                 const childCur = currentNames(child.id);
@@ -181,31 +179,34 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
                 if (!childHide && childPending.length) {
                     bits.push(`接下来：${childPending.slice(0, 8).join('、')}`);
                 }
-                return `  └ ${child.name}${bits.length ? `｜${bits.join('｜')}` : ''}｜要推进它就申请抽「${deck.name}」`;
+                return `  └ ${child.name}｜${bits.join('｜')}｜推进它就申请抽「${deck.name}」`;
             });
             parts.push(`支线：\n${childLines.join('\n')}`);
         }
         if (extra) {
             parts.push(`说明：${extra}`);
         }
-        const tail = parts.join('\n  ');
-        return `- ${deck.name}｜申请时写这串：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
+        const tail = parts.join('｜');
+        return `- ${deck.name}（<!--SE:${deck.id}-->）${tail ? `｜${tail}` : ''}`;
     });
-    const lockLine = lockName
-        ? `现在「${lockName}」开着不可打断，只压住了 ${Number(contextInfo.suppressedCount) || 0} 份清单；下面列出来的这些不在压制范围里，照常可以申请。\n`
+    // 模板在前（判断依据），「怎么结束」再往后，清单单独成块放最后——
+    // 模型最后看到的就是「能申请什么」，不会被前面一长段说明稀释掉。
+    const baseTemplate = String(template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', '').trimEnd();
+    const listBlock = usable.length > 0
+        ? [
+            '===== 可申请的清单（决定申请时，在回复最后单独一行写对应的标记，只写标记） =====',
+            ...lines,
+        ].join('\n')
         : '';
-    const body = usable.length > 0
-        ? lockLine + (template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', lines.join('\n'))
-        : '';
-    if (endable.length === 0) {
-        return body;
-    }
     const endLines = endable.map((deck) => `- ${deck.name}：<!--SE-END:${deck.id}--> 然后 <!--SE:${deck.id}-->`);
-    const endBlock = [
-        '只有下面这些内容已经彻底演完、该换下一段了，才在回复最后单独几行写：',
-        '1. 先写结束标记；2. 紧接着写换下一段的申请。',
-        '没演完就什么都不要写——只写申请不会换，写了也白写。',
-        endLines.join('\n'),
-    ].join('\n');
-    return body ? `${body}\n\n${endBlock}` : endBlock;
+    const endBlock = endable.length > 0
+        ? [
+            '===== 什么时候结束（只有下面这些内容已经彻底演完、该换下一段了，才写） =====',
+            '1. 先写结束标记；2. 紧接着写换下一段的申请。',
+            '没演完就什么都不要写——只写申请不会换，写了也白写。',
+            ...endLines,
+        ].join('\n')
+        : '';
+    const blocks = [baseTemplate, endBlock, listBlock].filter(Boolean);
+    return blocks.join('\n\n');
 }

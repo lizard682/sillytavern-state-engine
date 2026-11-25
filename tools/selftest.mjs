@@ -848,7 +848,7 @@ test('会告诉模型每份清单现在停在哪、后面还有哪些', () => {
     assert.ok(text.includes('师兄线'), 'should list the sub deck');
     assert.ok(text.includes('当前：第一章 代婚'), 'should show current item');
     assert.ok(text.includes('第二章 洞房'), 'should show the next chapter');
-    assert.ok(text.includes('要推进它就申请抽「剧情线」'), 'should say which deck to draw');
+    assert.ok(text.includes('推进它就申请抽「剧情线」'), 'should say which deck to draw');
 });
 
 test('没有开启 AI 判定的合集不会出现在提示里', () => {
@@ -882,7 +882,7 @@ test('已经出现过、或前置没满足的条目，不会混进「现在可�
     });
     assert.ok(text.includes('当前：第一条 代婚'), 'should show current');
     assert.ok(text.includes('第二条 洞房'), 'b is available once a appeared');
-    assert.ok(!text.includes('现在可以抽：第一条'), 'already appeared item must not be listed as drawable');
+    assert.ok(!text.includes('可申请：第一条'), 'already appeared item must not be listed as drawable');
     assert.ok(text.includes('还没解锁：第三条 三日'), 'c should be marked locked');
 });
 

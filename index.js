@@ -4188,8 +4188,9 @@ export async function init() {
             /* 缓存坏了就忽略 */
         }
         // 老版本默认模板（没改过的）跟着升级；用户自己改过的保留。
-        const legacyTemplate = typeof settings.aiTemplate === 'string'
-            && settings.aiTemplate.includes('可以申请的清单（下面会写清每份清单现在停在哪');
+        const tplText = typeof settings.aiTemplate === 'string' ? settings.aiTemplate : '';
+        const legacyTemplate = tplText.includes('可以申请的清单（下面会写清每份清单现在停在哪')
+            || tplText.includes('可以申请的清单如下：');
         if (!settings.aiTemplate || legacyTemplate) {
             settings.aiTemplate = DEFAULT_AI_TEMPLATE;
         }
