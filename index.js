@@ -1324,6 +1324,31 @@ function currentDateText(ctx) {
  * 给模型看的时间提示：告诉它现在是哪一天，以及跨天时按 MVU 规则更新哪个变量。
  * 没有日期时返回空串（不注入）。
  */
+/** 看这张卡本来用什么方式改变量，时间提示才能给出对得上的写法。 */
+function mvuUpdateStyle(ctx) {
+    const char = currentCharacterCard();
+    const bag = [];
+    if (char) {
+        const data = char.data || {};
+        bag.push(data.description, data.personality, data.scenario, data.system_prompt,
+            data.post_history_instructions, data.first_mes);
+        for (const entry of data.character_book?.entries || []) {
+            bag.push(entry.content, entry.comment);
+        }
+    }
+    const text = bag.filter(Boolean).join('\n');
+    if (!text) {
+        return 'none';
+    }
+    if (/<UpdateVariable>/i.test(text) || /JSONPatch/i.test(text)) {
+        return 'patch';
+    }
+    if (/变量更新|更新变量|stat_data|变量管理器/.test(text)) {
+        return 'generic';
+    }
+    return 'none';
+}
+
 function buildTimeHint(ctx) {
     const dateText = currentDateText(ctx);
     const root = ctx?.chatMetadata?.variables?.stat_data;
@@ -1336,12 +1361,21 @@ function buildTimeHint(ctx) {
         return '';
     }
     const extra = time && (time.时间 || time.天气) ? `（${[time.时间, time.天气].filter(Boolean).join(' · ')}）` : '';
-    return [
-        `【时间】现在是 ${text}${extra}。`,
-        '如果这一轮剧情确实跨到了新的一天，请照这张卡本来的变量更新方式，把时间和日期一起改掉：',
-        `「${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气」。`,
-        '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
-    ].join('\n');
+    const lines = [`【时间】现在是 ${text}${extra}。`];
+    const style = mvuUpdateStyle(ctx);
+    if (style === 'patch') {
+        lines.push('如果这一轮剧情确实跨到了新的一天，请照这张卡已有的变量更新格式（<UpdateVariable> 里的 JSONPatch）把这几个值一起改掉：');
+        lines.push(`- /${MVU_TIME_KEY}/日期`);
+        lines.push(`- /${MVU_TIME_KEY}/时间`);
+        lines.push(`- /${MVU_TIME_KEY}/天气`);
+        lines.push(`示例：{"op":"replace","path":"/${MVU_TIME_KEY}/日期","value":"第 2 天"}`);
+        lines.push('没跨天就不要改；也不要为了更新时间而硬推进剧情。');
+    } else if (style === 'generic') {
+        lines.push('如果这一轮剧情确实跨到了新的一天，请按这张卡已有的变量更新写法，把这几个值一起改掉：');
+        lines.push(`- ${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气`);
+        lines.push('没跨天就不要改；也不要为了更新时间而硬推进剧情。');
+    }
+    return lines.join('\n');
 }
 
 /**
