@@ -511,13 +511,11 @@
     box-shadow: inset 0 -2px 0 var(--SmartThemeQuoteColor, #d9a94a);
 }
 
-#state-engine-panel .se-deck-item,
-#state-engine-panel .se-item-name-view {
+#state-engine-panel [data-drag-handle] {
     cursor: grab;
 }
 
-#state-engine-panel .se-deck-item:active,
-#state-engine-panel .se-item-name-view:active {
+#state-engine-panel [data-drag-handle]:active {
     cursor: grabbing;
 }
 

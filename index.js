@@ -2654,11 +2654,11 @@ function renderSidebar(store) {
         const badge = deck.lock === true ? '<span class="se-deck-count se-deck-lock" title="不可打断：自动抽取只抽它">锁</span>'
             : (empty ? '<span class="se-deck-count se-deck-empty" title="没有可抽的条目了">空</span>' : '');
         return `
-        <div class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''} ${deck.enabled === false ? 'se-deck-off' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" draggable="true" title="拖动可以调整同层顺序" style="padding-left:${10 + depth * 16}px">
+        <div class="se-deck-item ${deck.id === selectedDeckId ? 'active' : ''} ${depth > 0 ? 'se-deck-child' : ''} ${empty ? 'se-deck-done' : ''} ${deck.enabled === false ? 'se-deck-off' : ''}" data-action="select-deck" data-deck="${escapeHtml(deck.id)}" title="拖动标题可以调整同层顺序" style="padding-left:${10 + depth * 16}px">
             <label class="se-deck-toggle" title="启用 / 停用这个合集">
                 <input type="checkbox" data-deck-enabled="${escapeHtml(deck.id)}" ${deck.enabled === false ? '' : 'checked'}>
             </label>
-            <span class="se-deck-item-name">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}${badge}</span>
+            <span class="se-deck-item-name" draggable="true" data-drag-handle="deck">${depth > 0 ? '└ ' : ''}${escapeHtml(deck.name || '未命名')}${childCount > 0 ? ` <span class="se-deck-count">${childCount}</span>` : ''}${badge}</span>
             <span class="se-deck-item-meta">${escapeHtml(deck.binding?.name || triggerSummary(deck))}</span>
             <span class="se-deck-item-value">${escapeHtml(currentLabel(deck, store))}</span>
         </div>`;
@@ -2767,12 +2767,12 @@ function renderItems(deck, store) {
             avoidCount ? `互斥 ${avoidCount}` : '',
         ].filter(Boolean).join(' · ');
         return `
-        <div class="se-item-row ${item.enabled === false ? 'se-item-off' : ''}" data-item="${escapeHtml(item.id)}" draggable="true">
+        <div class="se-item-row ${item.enabled === false ? 'se-item-off' : ''}" data-item="${escapeHtml(item.id)}">
             <div class="se-item-main" data-action="toggle-item">
                 <label class="se-item-toggle" title="启用 / 停用这条（停用后不参与抽签，内容保留）">
                     <input type="checkbox" data-item-enabled="${escapeHtml(item.id)}" ${item.enabled === false ? '' : 'checked'}>
                 </label>
-                <span class="se-item-name-view">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
+                <span class="se-item-name-view" draggable="true" data-drag-handle="item">${escapeHtml(item.name || '未命名')}${flags ? `<em class="se-item-flag">${escapeHtml(flags)}</em>` : ''}</span>
                 <input type="number" class="text_pole se-item-weight" data-item-field="weight" min="0" step="10" value="${weightPercent}" title="出现概率：100% 是基准；填 0 表示永不出现。填 200% 就是基准的两倍。">
                 <button type="button" class="se-icon-btn" data-action="delete-item" data-deck="${escapeHtml(deck.id)}" data-item="${escapeHtml(item.id)}" title="删除这条">×</button>
             </div>
@@ -3549,15 +3549,17 @@ function setupDragSort(root) {
         });
     };
     root.addEventListener('dragstart', (event) => {
-        // 在输入框里拖选文字时不要触发排序。
-        if (event.target.closest('input, textarea, select')) {
+        // 只有「折叠后的标题」能拖：在正文、输入框、勾选框里拖一律不排序。
+        const handle = event.target.closest('[data-drag-handle]');
+        if (!handle || event.target.closest('input, textarea, select')) {
             event.preventDefault();
             return;
         }
-        const deckEl = event.target.closest('#se-deck-list .se-deck-item');
-        const itemEl = event.target.closest('#se-editor .se-item-row');
+        const deckEl = handle.closest('#se-deck-list .se-deck-item');
+        const itemEl = handle.closest('#se-editor .se-item-row');
         const el = deckEl || itemEl;
         if (!el) {
+            event.preventDefault();
             return;
         }
         kind = deckEl ? 'deck' : 'item';
