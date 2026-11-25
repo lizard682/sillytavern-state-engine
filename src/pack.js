@@ -375,6 +375,13 @@ export function validatePack(raw) {
     const items = [];
     if (Array.isArray(raw.items)) {
         raw.items.forEach((item, index) => {
+            // 条目 id 会直接当对象键用（进度、冷却、降权记录），必须和合集 id 一样受约束。
+            if (isPlainObject(item) && item.id != null) {
+                const rawId = asString(item.id);
+                if (!rawId || !/^[a-zA-Z0-9_-]{1,64}$/.test(rawId) || RESERVED_IDS.has(rawId)) {
+                    errors.push(`第 ${index + 1} 条的 id 不合法（只能用字母、数字、下划线、短横线，最多 64 个字符，且不能用保留字）`);
+                }
+            }
             const normalized = normalizeItem(item, index);
             if (!normalized) {
                 errors.push(`第 ${index + 1} 条清单项无法识别`);
@@ -430,7 +437,7 @@ export function serializePack(pack) {
         schema: PACK_SCHEMA,
         id: pack.id,
         name: pack.name,
-        ...normalizeNesting(pack),
+        nesting: normalizeNesting(pack),
         binding: normalizeBinding(pack.binding),
         trigger: normalizeTrigger(pack.trigger),
         keywords: normalizeKeywords(pack.keywords),

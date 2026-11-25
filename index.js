@@ -61,7 +61,7 @@ import {
     syncTurn,
 } from './src/state.js';
 import { formatLedger } from './src/ledger.js';
-import { freshSeed } from './src/rng.js';
+import { freshSeed, hashSeed } from './src/rng.js';
 
 const SETTINGS_KEY = 'stateEngine';
 const STORE_KEY = 'stateEngine';
@@ -746,7 +746,9 @@ async function exportDecksToCard(options = {}) {
     };
     const promptEntry = buildCardPromptEntry(character);
     if (promptEntry) {
+        // 只加条目，保留世界书原有的 name / scan_depth / token_budget 等元数据。
         data.character_book = {
+            ...(character.data.character_book || {}),
             entries: [...(character.data.character_book?.entries || []), promptEntry],
         };
     }
@@ -867,12 +869,21 @@ function importCardDecks(options = {}) {
     let added = 0;
     let skipped = 0;
     let replaced = 0;
+    let rejected = 0;
     for (const raw of incoming) {
+        // 别人给的卡也可能带坏数据：先按导入同一套规则校验，非法就跳过并计数。
+        const checked = validatePack({ ...raw, schema: PACK_SCHEMA });
+        if (!checked.ok) {
+            console.warn('[state-engine] 卡内合集没通过校验', raw?.id, checked.errors);
+            rejected += 1;
+            continue;
+        }
         let deck;
         try {
-            deck = normalizeDeckShape(JSON.parse(JSON.stringify(raw)));
+            deck = normalizeDeckShape(JSON.parse(JSON.stringify(checked.pack)));
         } catch (error) {
             console.warn('[state-engine] 卡内合集格式异常', raw?.id, error);
+            rejected += 1;
             continue;
         }
         const index = store.decks.findIndex((item) => item.id === deck.id);
@@ -892,12 +903,13 @@ function importCardDecks(options = {}) {
     refreshInjections();
     renderPanel();
     cardHintDismissed = '';
+    const rejectedNote = rejected > 0 ? `；${rejected} 个没通过校验，已跳过` : '';
     if (skipped > 0 && !overwrite) {
-        toast('success', `已导入：新增 ${added} 个；${skipped} 个同名合集已存在，保持原样没有覆盖`);
+        toast('success', `已导入：新增 ${added} 个；${skipped} 个同名合集已存在，保持原样没有覆盖${rejectedNote}`);
     } else {
-        toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个`);
+        toast('success', `已从角色卡导入：新增 ${added} 个，覆盖 ${replaced} 个${rejectedNote}`);
     }
-    return { added, replaced, skipped };
+    return { added, replaced, skipped, rejected };
 }
 
 // ---------------------------------------------------------------------------
@@ -1623,10 +1635,11 @@ function keywordHit(text, keyword) {
     if (!kw || kw.length > 120) {
         return false;
     }
-    // /正则/ 写法；长度受控，避免导入的包拿灾难性回溯卡住页面。
+    // /正则/ 写法；模式长度受控，但输入也要截断——否则 (a+)+b 这类模式遇上长正文会炸回溯。
     if (kw.length > 2 && kw.startsWith('/') && kw.endsWith('/')) {
         try {
-            return new RegExp(kw.slice(1, -1), 'i').test(text);
+            const clipped = String(text || '').slice(0, 4000);
+            return new RegExp(kw.slice(1, -1), 'i').test(clipped);
         } catch {
             return false;
         }
@@ -1750,12 +1763,12 @@ function advanceOnGeneration() {
             expireIfDue(store.state, deck);
         }
     }
-    // 模型主动喊停的内容。
+    // 模型主动喊停的内容：只看这条内容自己是不是「由 AI 结束」，与合集是否勾了 AI 判定无关。
     const endMarkers = endMarkersInLastAiMessage();
     const endedIds = [];
     if (endMarkers.length > 0 && markerFloor !== floor) {
         for (const deck of store.decks) {
-            if (deck.enabled === false || (deck.trigger || DEFAULT_TRIGGER).ai !== true) {
+            if (deck.enabled === false) {
                 continue;
             }
             if (endMarkers.includes(deck.id)) {
@@ -4228,11 +4241,15 @@ function applyMvuUpdates(store, ctx) {
         return 0;
     }
     const floor = chat.length;
-    if (Number(store.state.appliedPatchFloor) === floor) {
+    // 防重键要带正文指纹：删楼后重新生成，楼层数会回到同一个值，只比楼层数会把新回复整段跳过。
+    const rawMes = String(last.mes || '');
+    const patchKey = `${floor}:${rawMes.length}:${hashSeed(rawMes)}`;
+    if (store.state.appliedPatchKey === patchKey) {
         return 0;
     }
-    const ops = extractPatches(String(last.mes || ''));
+    const ops = extractPatches(rawMes);
     if (!ops.length) {
+        store.state.appliedPatchKey = patchKey;
         store.state.appliedPatchFloor = floor;
         return 0;
     }
@@ -4241,6 +4258,7 @@ function applyMvuUpdates(store, ctx) {
         return 0;
     }
     const changed = applyJsonPatch(root, ops);
+    store.state.appliedPatchKey = patchKey;
     store.state.appliedPatchFloor = floor;
     if (changed > 0) {
         ctx.saveMetadataDebounced?.();
@@ -4307,7 +4325,7 @@ function processAiMarkers(store, ctx) {
     const endMarkers = endMarkersInLastAiMessage();
     if (endMarkers.length > 0) {
         for (const deck of store.decks) {
-            if (deck.enabled === false || (deck.trigger || DEFAULT_TRIGGER).ai !== true) {
+            if (deck.enabled === false) {
                 continue;
             }
             if (endMarkers.includes(deck.id)) {
@@ -4451,7 +4469,6 @@ export async function clean() {
             installCardExportHook.installed = false;
         }
         document.getElementById(BUTTON_ID)?.remove();
-        delete ctx?.extensionSettings?.[SETTINGS_KEY];
     } catch (error) {
         console.warn('[state-engine] clean failed', error);
     }

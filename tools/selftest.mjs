@@ -333,6 +333,29 @@ test('旧包没有 summon 时补默认值', () => {
     assert.deepEqual(wire.summon, { by: [], only: false });
 });
 
+test('层级按 nesting 导出，并且能原样导回来', () => {
+    const deck = makeDeck({ nesting: { parent: 'root-deck', onlyFromParent: true, entryWeight: 2 } });
+    const wire = serializePack(deck);
+    assert.equal(wire.parent, undefined);
+    assert.deepEqual(wire.nesting, { parent: 'root-deck', onlyFromParent: true, entryWeight: 2 });
+    const again = validatePack(wire);
+    assert.equal(again.ok, true);
+    assert.equal(again.pack.parent, 'root-deck');
+    assert.equal(again.pack.onlyFromParent, true);
+    assert.equal(again.pack.entryWeight, 2);
+});
+
+test('条目 id 不合法（保留字或含冒号）时导入被拒', () => {
+    const deck = serializePack(makeDeck());
+    deck.items = [
+        { id: '__proto__', name: '坏条目', text: '坏' },
+        { id: 'a::b', name: '坏条目 2', text: '坏' },
+    ];
+    const result = validatePack(deck);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((line) => line.includes('id 不合法')));
+});
+
 // ---------------------------------------------------------------------------
 
 section('持续时长');
