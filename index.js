@@ -30,6 +30,7 @@ import {
     normalizeRequires,
     normalizeExcludes,
     normalizeFatigue,
+    normalizeLockTargets,
     normalizeTimeUnit,
     serializePack,
     validatePack,
@@ -163,6 +164,7 @@ function normalizeDeckShape(deck) {
         deck.summon.only = deck.summon.only === true;
     }
     deck.lock = deck.lock === true;
+    deck.lockTargets = normalizeLockTargets(deck.lockTargets);
     deck.reveal = deck.reveal === 'deck' ? 'deck' : 'items';
     deck.timeUnit = normalizeTimeUnit(deck.timeUnit);
     deck.compose = Array.isArray(deck.compose)
@@ -1445,7 +1447,7 @@ function refreshInjections() {
             return false;
         }
         if (lockDeck) {
-            return deck.id === lockDeck.id;
+            return deck.id === lockDeck.id || !lockSuppresses(deck, lockDeck);
         }
         return deck.onlyFromParent !== true && deck.summon?.only !== true;
     });
@@ -1618,6 +1620,22 @@ function matchDeckKeywords(deck, ctx, extraText = '') {
 }
 
 /**
+ * 「不可打断」到底压制谁：
+ * - 没有指定压制名单时，只压同一层的其它合集（父合集相同）；
+ * - 指定了名单时，只压名单里的合集，其它层级的完全不受影响。
+ */
+function lockSuppresses(deck, lockDeck) {
+    if (!lockDeck || !deck || deck.id === lockDeck.id) {
+        return false;
+    }
+    const targets = Array.isArray(lockDeck.lockTargets) ? lockDeck.lockTargets : [];
+    if (targets.length > 0) {
+        return targets.includes(deck.id);
+    }
+    return String(deck.parent || '') === String(lockDeck.parent || '');
+}
+
+/**
  * 生成开始时的推进：
  * 1. 楼层自动：到点了就抽；
  * 2. 关键词：最近消息里命中词就抽；
@@ -1677,7 +1695,7 @@ function advanceOnGeneration() {
         if (deck.enabled === false || !bindingActive(deck, ctx, pendingInput)) {
             continue;
         }
-        if (lockDeck && deck.id !== lockDeck.id) {
+        if (lockSuppresses(deck, lockDeck)) {
             continue;
         }
         // 已经抽无可抽的合集，不再参与自动抽取。
@@ -1793,7 +1811,7 @@ function applySummons(store, ctx, seededIds) {
                 if (visited.has(deck.id) || deck.enabled === false || !bindingActive(deck, ctx)) {
                     continue;
                 }
-                if (lockDeck && deck.id !== lockDeck.id) {
+                if (lockSuppresses(deck, lockDeck)) {
                     continue;
                 }
                 if (deckExhausted(store.state, store.decks, deck.id)) {
@@ -1987,6 +2005,8 @@ function setDeckField(deckId, path, value) {
         deck[head][tail] = value;
     } else if (path === 'keywords') {
         deck.keywords = normalizeKeywords(value);
+    } else if (path === 'lockTargets') {
+        deck.lockTargets = normalizeLockTargets(value);
     } else if (path === 'reveal') {
         deck.reveal = value === 'deck' ? 'deck' : 'items';
     } else {
@@ -1999,8 +2019,8 @@ function setDeckField(deckId, path, value) {
     saveStore();
     refreshInjections();
     // 只更新会变的部分，避免整块重绘导致折叠状态和输入焦点丢失。
-    if (path === 'parent') {
-        // 父级变了，下拉选项和层级缩进都要重算，只能整块重绘。
+    if (path === 'parent' || path === 'lock') {
+        // 父级变了，下拉选项和层级缩进都要重算；开关「不可打断」也要露出/收起压制范围。
         renderPanel();
         return;
     }
@@ -2869,6 +2889,8 @@ function renderEditor(store) {
     const summonNames = (summon.by || []).map((id) => store.decks.find((item) => item.id === id)?.name || id);
     const compose = Array.isArray(deck.compose) ? deck.compose : [];
     const composeNames = compose.map((id) => store.decks.find((item) => item.id === id)?.name || id);
+    const lockTargets = Array.isArray(deck.lockTargets) ? deck.lockTargets : [];
+    const lockNames = lockTargets.map((id) => store.decks.find((item) => item.id === id)?.name || id);
     const hold = deck.hold || DEFAULT_HOLD;
     const binding = deck.binding || DEFAULT_BINDING;
     // 有上级合集的，什么时候抽由上级决定，自己那套触发条件不生效。
@@ -3046,7 +3068,13 @@ function renderEditor(store) {
         </details>
 
         <div class="se-section-title">不可打断</div>
-        <label class="se-checks se-check-wide"><input type="checkbox" data-deck-field="lock" ${deck.lock ? 'checked' : ''}><span>开着时只抽它：同一层的其它合集暂时休眠，直到它抽无可抽</span></label>
+        <label class="se-checks se-check-wide"><input type="checkbox" data-deck-field="lock" ${deck.lock ? 'checked' : ''}><span>开着时只抽它：被它压制的合集暂时休眠，直到它抽无可抽</span></label>
+        ${deck.lock ? `<details class="se-multi-select se-lock-scope">
+            <summary id="se-lock-summary" title="${escapeHtml(lockNames.join('、'))}">${escapeHtml(lockNames.length ? `压制 ${lockNames.length} 个：${lockNames.join('、')}` : '不指定：只压同一层的其它合集')}</summary>
+            <div class="se-summon-list">
+                ${store.decks.filter((item) => item.id !== deck.id).map((item) => `<label><input type="checkbox" data-lock-target="${escapeHtml(item.id)}" ${(lockTargets || []).includes(item.id) ? 'checked' : ''}><span>${escapeHtml(item.name || item.id)}</span></label>`).join('') || '<span class="se-hint">还没有别的合集。</span>'}
+            </div>
+        </details>` : ''}
 
         <div class="se-hint">持续的时长改成由「条目自己」决定了：展开任意条目，在最下面的「这条自己的持续」里设。内容还在持续期里时，这个合集不会被自动抽到下一次（手动「抽一条」或「重抽」不受限制）。</div>
 
@@ -3702,6 +3730,20 @@ function bindPanelEvents() {
             const summary = document.getElementById('se-compose-summary');
             if (summary) {
                 summary.textContent = names.length ? `已选 ${names.length} 个：${names.join('、')}` : '还没有组合来源，点这里选择';
+                summary.title = names.join('、');
+            }
+        } else if (target.dataset.lockTarget) {
+            const root = document.getElementById('se-editor');
+            const ids = [...(root?.querySelectorAll('[data-lock-target]') || [])]
+                .filter((el) => el.checked)
+                .map((el) => el.dataset.lockTarget);
+            setDeckField(deckId, 'lockTargets', ids);
+            const fresh = getStore();
+            const freshDeck = fresh?.decks.find((item) => item.id === deckId);
+            const names = (freshDeck?.lockTargets || []).map((id) => fresh.decks.find((item) => item.id === id)?.name || id);
+            const summary = document.getElementById('se-lock-summary');
+            if (summary) {
+                summary.textContent = names.length ? `压制 ${names.length} 个：${names.join('、')}` : '不指定：只压同一层的其它合集';
                 summary.title = names.join('、');
             }
         } else if (target.dataset.scanField) {

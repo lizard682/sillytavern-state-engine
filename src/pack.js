@@ -216,6 +216,14 @@ function normalizeCompose(raw) {
     return [...new Set(raw.map((id) => asString(id)).filter((id) => SUMMON_ID_RE.test(id) && !RESERVED_IDS.has(id)))];
 }
 
+/** 「不可打断」压制范围：空数组表示只压同层的其它合集。 */
+export function normalizeLockTargets(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    return [...new Set(raw.map((id) => asString(id)).filter((id) => SUMMON_ID_RE.test(id) && !RESERVED_IDS.has(id)))];
+}
+
 /** 冷却单位：按楼层（默认）或按游戏内天数（读 MVU 变量里的日期）。 */
 export const TIME_UNITS = ['turn', 'day'];
 
@@ -409,6 +417,7 @@ export function validatePack(raw) {
             timeUnit: normalizeTimeUnit(raw.timeUnit),
             pick: asInt(raw.pick, 1, 1),
             lock: raw.lock === true,
+            lockTargets: normalizeLockTargets(raw.lockTargets),
             aiPrompt: asString(raw.aiPrompt),
             items,
         },
@@ -436,6 +445,7 @@ export function serializePack(pack) {
         ...(normalizeTimeUnit(pack.timeUnit) === 'day' ? { timeUnit: 'day' } : {}),
         pick: asInt(pack.pick, 1, 1),
         ...(pack.lock === true ? { lock: true } : {}),
+        ...(Array.isArray(pack.lockTargets) && pack.lockTargets.length ? { lockTargets: pack.lockTargets.slice() } : {}),
         aiPrompt: asString(pack.aiPrompt),
         items: pack.items.map((item) => ({
             id: item.id,
