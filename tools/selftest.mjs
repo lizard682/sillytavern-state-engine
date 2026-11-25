@@ -8,6 +8,7 @@ import { validatePack, serializePack, normalizeKeywords, DEFAULT_TRIGGER, PACK_S
 import { createState, drawDeck, drawDeckTree, deckState, clearDeckHistory, pickWithRng, syncTurn, expireIfDue, endHold, activeLockDeck, deckExhausted, availableItems, applyCompose, applyInitial, holdActive, effectiveWeight, applyFatigueOnHit, captureFrame, restoreFrame, parseGameDay, gameDayFromVariables } from '../src/state.js';
 import { createRng, hashSeed } from '../src/rng.js';
 import { buildDirectorPrompt } from '../src/inject.js';
+import { applyJsonPatch, extractPatches } from '../src/jsonpatch.js';
 
 let passed = 0;
 let failed = 0;
@@ -1221,6 +1222,31 @@ test('「由 AI 结束」的条目，AI 写结束标记会被清掉', () => {
     const ended = endHold(state, deck);
     assert.equal(ended, true);
     assert.equal(ds.current.length, 0);
+});
+
+test('[变量更新] 数组格式的更新块能被解析并应用', () => {
+    const text = '<UpdateVariable>\n<JSONPatch>\n[\n{"op":"replace","path":"/状态引擎时间/日期","value":"第 2 天"}\n]\n</JSONPatch>\n</UpdateVariable>';
+    const ops = extractPatches(text);
+    assert.equal(ops.length, 1);
+    const root = { 状态引擎时间: { 日期: '第1天' } };
+    assert.equal(applyJsonPatch(root, ops), 1);
+    assert.equal(root.状态引擎时间.日期, '第 2 天');
+});
+
+test('[变量更新] 一行一个对象的写法也能解析', () => {
+    const text = '<UpdateVariable>\n{"op":"replace","path":"/状态引擎时间/天气","value":"晴"}\n{"op":"replace","path":"/状态引擎时间/时间","value":"清晨"}\n</UpdateVariable>';
+    const ops = extractPatches(text);
+    assert.equal(ops.length, 2);
+    const root = { 状态引擎时间: { 天气: '阴', 时间: '08:00' } };
+    assert.equal(applyJsonPatch(root, ops), 2);
+    assert.equal(root.状态引擎时间.天气, '晴');
+    assert.equal(root.状态引擎时间.时间, '清晨');
+});
+
+test('[变量更新] 路径首段是 stat_data 时会剥掉，且能新建不存在的键', () => {
+    const root = {};
+    assert.equal(applyJsonPatch(root, [{ op: 'add', path: '/stat_data/状态引擎时间/日期', value: '第 1 天' }]), 1);
+    assert.equal(root.状态引擎时间.日期, '第 1 天');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

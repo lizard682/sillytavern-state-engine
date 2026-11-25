@@ -15,6 +15,7 @@ import {
     injectDeck,
     promptKey,
 } from './src/inject.js';
+import { applyJsonPatch, extractPatches } from './src/jsonpatch.js';
 import {
     DEFAULT_BINDING,
     DEFAULT_HOLD,
@@ -88,7 +89,7 @@ const DEFAULT_TIME_TEMPLATE = [
     '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
 ].join('\n');
 
-let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, timeTemplate: DEFAULT_TIME_TEMPLATE, timeDepth: 4, autoCardSync: false, globalDecks: [] };
+let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, timeTemplate: DEFAULT_TIME_TEMPLATE, timeDepth: 4, autoCardSync: false, applyMvuPatches: true, globalDecks: [] };
 /** 合集数据改动过、还没写进角色卡。勾了「导出时自动带上」时，导出那一刻才真正写。 */
 let cardSyncDirty = false;
 let selectedDeckId = null;
@@ -3246,6 +3247,10 @@ function renderPanel() {
     if (timeDepthInput && document.activeElement !== timeDepthInput) {
         timeDepthInput.value = String(Math.max(0, Number(settings.timeDepth) || 0));
     }
+    const applyPatchesInput = root.querySelector('#se-apply-patches');
+    if (applyPatchesInput) {
+        applyPatchesInput.checked = settings.applyMvuPatches !== false;
+    }
     const autoCardSyncInput = root.querySelector('#se-auto-card-sync');
     if (autoCardSyncInput) {
         autoCardSyncInput.checked = settings.autoCardSync === true;
@@ -3338,6 +3343,14 @@ function buildPanel() {
                     <div class="se-global-actions">
                         <button type="button" class="menu_button" data-action="reset-time-template">恢复默认时间提示</button>
                     </div>
+                </div>
+                <div class="se-set-group">
+                    <div class="se-section-title">变量更新</div>
+                    <label class="se-check se-check-wide">
+                        <input type="checkbox" id="se-apply-patches">
+                        <span>由插件解析 AI 的 &lt;UpdateVariable&gt; 更新块并改写变量</span>
+                    </label>
+                    <div class="se-hint">没装 MVU 时勾上它，时间这类变量才会真的变；装了 MVU 就关掉，免得两边同时写。插件只负责把 JSONPatch 写进变量，不做别的判断。</div>
                 </div>
                 <div class="se-set-group">
                     <div class="se-section-title">随卡导出</div>
@@ -3760,6 +3773,13 @@ function bindPanelEvents() {
         saveSettings();
         refreshInjections();
         toast('success', `时间提示改到倒数第 ${settings.timeDepth} 条之前`);
+    });
+
+    root.querySelector('#se-apply-patches')?.addEventListener('change', (event) => {
+        settings.applyMvuPatches = event.target.checked === true;
+        saveSettings();
+        toast(settings.applyMvuPatches ? 'success' : 'info',
+            settings.applyMvuPatches ? '插件会自己应用 AI 的变量更新块' : '插件不再改变量，交给卡里的 MVU');
     });
 
     root.querySelector('#se-auto-card-sync')?.addEventListener('change', (event) => {
@@ -4193,6 +4213,41 @@ function onGenerationStarted(type, _params, isDryRun) {
  * AI 消息落地后立刻认标记并抽签。
  * 这样下一轮生成时注入已经是最新内容，不会出现「这一轮白跑、下一轮才换」。
  */
+/**
+ * 没装 MVU 时由插件代劳：把最后一条 AI 回复里的 <UpdateVariable> 块解析成 JSONPatch，
+ * 直接写进 chat_metadata.variables.stat_data。装了 MVU 就该关掉，免得两边同时写。
+ */
+function applyMvuUpdates(store, ctx) {
+    if (!store || !ctx || settings.applyMvuPatches === false) {
+        return 0;
+    }
+    const chat = ctx.chat || [];
+    const last = chat[chat.length - 1];
+    if (!last || last.is_user || last.is_system) {
+        return 0;
+    }
+    const floor = chat.length;
+    if (Number(store.state.appliedPatchFloor) === floor) {
+        return 0;
+    }
+    const ops = extractPatches(String(last.mes || ''));
+    if (!ops.length) {
+        store.state.appliedPatchFloor = floor;
+        return 0;
+    }
+    const root = ctx.chatMetadata?.variables?.stat_data;
+    if (!root || typeof root !== 'object') {
+        return 0;
+    }
+    const changed = applyJsonPatch(root, ops);
+    store.state.appliedPatchFloor = floor;
+    if (changed > 0) {
+        ctx.saveMetadataDebounced?.();
+        toast('success', `已按 AI 的更新块改写了 ${changed} 处变量`);
+    }
+    return changed;
+}
+
 function onMessageReceived() {
     // 等 ST 把消息写进 chat 再读。
     setTimeout(() => {
@@ -4201,7 +4256,9 @@ function onMessageReceived() {
             if (!store || !settings.enabled) {
                 return;
             }
-            processAiMarkers(store, liveContext());
+            const ctx = liveContext();
+            applyMvuUpdates(store, ctx);
+            processAiMarkers(store, ctx);
         } catch (error) {
             console.warn('[state-engine] marker handling failed', error);
         }
