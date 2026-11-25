@@ -79,7 +79,16 @@ const PANEL_ID = 'state-engine-panel';
 const BUTTON_ID = 'state-engine-button';
 
 let context;
-let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, autoCardSync: false, globalDecks: [] };
+/** 时间提示的默认模板：{{time}} 现在的时间，{{paths}} 要改的变量路径，{{example}} 一条示例。 */
+const DEFAULT_TIME_TEMPLATE = [
+    '【时间】现在是 {{time}}。',
+    '如果这一轮剧情确实跨到了新的一天，请照这张卡已有的变量更新格式把这几个值一起改掉：',
+    '{{paths}}',
+    '{{example}}',
+    '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
+].join('\n');
+
+let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, timeTemplate: DEFAULT_TIME_TEMPLATE, timeDepth: 4, autoCardSync: false, globalDecks: [] };
 /** 合集数据改动过、还没写进角色卡。勾了「导出时自动带上」时，导出那一刻才真正写。 */
 let cardSyncDirty = false;
 let selectedDeckId = null;
@@ -1349,6 +1358,7 @@ function mvuUpdateStyle(ctx) {
     return 'none';
 }
 
+/** 时间提示的默认模板：{{time}} 现在的时间，{{paths}} 要改的变量路径，{{example}} 一条示例。 */
 function buildTimeHint(ctx) {
     const dateText = currentDateText(ctx);
     const root = ctx?.chatMetadata?.variables?.stat_data;
@@ -1361,21 +1371,30 @@ function buildTimeHint(ctx) {
         return '';
     }
     const extra = time && (time.时间 || time.天气) ? `（${[time.时间, time.天气].filter(Boolean).join(' · ')}）` : '';
-    const lines = [`【时间】现在是 ${text}${extra}。`];
     const style = mvuUpdateStyle(ctx);
-    if (style === 'patch') {
-        lines.push('如果这一轮剧情确实跨到了新的一天，请照这张卡已有的变量更新格式（<UpdateVariable> 里的 JSONPatch）把这几个值一起改掉：');
-        lines.push(`- /${MVU_TIME_KEY}/日期`);
-        lines.push(`- /${MVU_TIME_KEY}/时间`);
-        lines.push(`- /${MVU_TIME_KEY}/天气`);
-        lines.push(`示例：{"op":"replace","path":"/${MVU_TIME_KEY}/日期","value":"第 2 天"}`);
-        lines.push('没跨天就不要改；也不要为了更新时间而硬推进剧情。');
-    } else if (style === 'generic') {
-        lines.push('如果这一轮剧情确实跨到了新的一天，请按这张卡已有的变量更新写法，把这几个值一起改掉：');
-        lines.push(`- ${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气`);
-        lines.push('没跨天就不要改；也不要为了更新时间而硬推进剧情。');
+    const paths = style === 'patch'
+        ? `- /${MVU_TIME_KEY}/日期\n- /${MVU_TIME_KEY}/时间\n- /${MVU_TIME_KEY}/天气`
+        : style === 'generic'
+            ? `- ${MVU_TIME_KEY}.日期 / ${MVU_TIME_KEY}.时间 / ${MVU_TIME_KEY}.天气`
+            : '';
+    const example = style === 'patch'
+        ? `示例：{"op":"replace","path":"/${MVU_TIME_KEY}/日期","value":"第 2 天"}`
+        : '';
+    const template = String(settings.timeTemplate || DEFAULT_TIME_TEMPLATE);
+    const lines = [];
+    for (const line of template.split('\n')) {
+        if (line.includes('{{paths}}') && !paths) {
+            continue;
+        }
+        if (line.includes('{{example}}') && !example) {
+            continue;
+        }
+        lines.push(line
+            .replace(/\{\{time\}\}/g, `${text}${extra}`)
+            .replace(/\{\{paths\}\}/g, paths)
+            .replace(/\{\{example\}\}/g, example));
     }
-    return lines.join('\n');
+    return lines.join('\n').trim();
 }
 
 /**
@@ -1458,7 +1477,8 @@ function refreshInjections() {
         store.state.gameDay = gameDay;
     }
     // 时间提示：告诉模型现在是哪一天，跨天时按 MVU 规则更新「状态引擎时间」。
-    ctx.setExtensionPrompt('stateEngine:time', buildTimeHint(ctx), PROMPT_POSITION.chat, 4, false, PROMPT_ROLE.system);
+    const timeDepth = Math.max(0, Number(settings.timeDepth) || 0);
+    ctx.setExtensionPrompt('stateEngine:time', buildTimeHint(ctx), PROMPT_POSITION.chat, timeDepth, false, PROMPT_ROLE.system);
     for (const deck of store.decks) {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
             ctx.setExtensionPrompt(promptKey(deck.id), '', PROMPT_POSITION.chat, 0, false, PROMPT_ROLE.system);
@@ -3201,6 +3221,14 @@ function renderPanel() {
     if (aiDepthInput && document.activeElement !== aiDepthInput) {
         aiDepthInput.value = String(Math.max(0, Number(settings.aiDepth) || 4));
     }
+    const timeTemplate = root.querySelector('#se-time-template');
+    if (timeTemplate && document.activeElement !== timeTemplate) {
+        timeTemplate.value = settings.timeTemplate || DEFAULT_TIME_TEMPLATE;
+    }
+    const timeDepthInput = root.querySelector('#se-time-depth');
+    if (timeDepthInput && document.activeElement !== timeDepthInput) {
+        timeDepthInput.value = String(Math.max(0, Number(settings.timeDepth) || 0));
+    }
     const autoCardSyncInput = root.querySelector('#se-auto-card-sync');
     if (autoCardSyncInput) {
         autoCardSyncInput.checked = settings.autoCardSync === true;
@@ -3277,6 +3305,21 @@ function buildPanel() {
                     </label>
                     <div class="se-global-actions">
                         <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认提示词</button>
+                    </div>
+                </div>
+                <div class="se-set-group">
+                    <div class="se-section-title">时间提示</div>
+                    <label class="se-field">
+                        <span>每轮随生成发给模型的时间说明</span>
+                        <textarea id="se-time-template" class="text_pole" rows="5"></textarea>
+                    </label>
+                    <div class="se-hint">可用占位符：{{time}} 现在的时间、{{paths}} 要改的变量路径、{{example}} 一条 JSONPatch 示例。后面两个按卡里有没有 MVU 自动生成；没有就整行省略。</div>
+                    <label class="se-field">
+                        <span>插入深度（倒数第几条之前；越小越靠近当前输入）</span>
+                        <input id="se-time-depth" type="number" class="text_pole" min="0" step="1">
+                    </label>
+                    <div class="se-global-actions">
+                        <button type="button" class="menu_button" data-action="reset-time-template">恢复默认时间提示</button>
                     </div>
                 </div>
                 <div class="se-set-group">
@@ -3687,6 +3730,21 @@ function bindPanelEvents() {
         toast('success', `AI 判定提示改到倒数第 ${settings.aiDepth} 条之前`);
     });
 
+    root.querySelector('#se-time-template')?.addEventListener('change', (event) => {
+        settings.timeTemplate = event.target.value || DEFAULT_TIME_TEMPLATE;
+        saveSettings();
+        refreshInjections();
+        toast('success', '时间提示已保存');
+    });
+
+    root.querySelector('#se-time-depth')?.addEventListener('change', (event) => {
+        settings.timeDepth = Math.max(0, Number(event.target.value) || 0);
+        event.target.value = String(settings.timeDepth);
+        saveSettings();
+        refreshInjections();
+        toast('success', `时间提示改到倒数第 ${settings.timeDepth} 条之前`);
+    });
+
     root.querySelector('#se-auto-card-sync')?.addEventListener('change', (event) => {
         settings.autoCardSync = event.target.checked === true;
         saveSettings();
@@ -3759,6 +3817,12 @@ function bindPanelEvents() {
             refreshInjections();
             renderPanel();
             toast('success', 'AI 判定模板已恢复默认');
+        } else if (action === 'reset-time-template') {
+            settings.timeTemplate = DEFAULT_TIME_TEMPLATE;
+            saveSettings();
+            refreshInjections();
+            renderPanel();
+            toast('success', '时间提示已恢复默认');
         } else if (action === 'export-guide') {
             exportAiGuide();
         } else if (action === 'toggle-air') {
