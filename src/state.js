@@ -395,6 +395,10 @@ export function applyInitial(state, deck) {
     ds.current = initials.map((item) => item.id);
     ds.initialized = true;
     ds.holdStart = Number(state.turn) || 0;
+    ds.holdStartDay = Number.isFinite(Number(state.gameDay)) ? Number(state.gameDay) : -1;
+    // 初始值也要带上「抽中那一条」的持续设置，否则天数/轮数到期判断会失效。
+    const initialHold = initials.map((item) => item && item.hold).find(Boolean) || deck.hold || null;
+    ds.hold = initialHold ? { ...initialHold } : null;
     ds.used = false;
     // 初始值也算「出现过」，否则后面 requires 指向它的条目会永远等不到。
     recordProgress(state, deck.id, initials);
@@ -827,6 +831,12 @@ export function holdActive(state, deck) {
 export function endHold(state, deck, cause = 'ai-end') {
     const ds = deckState(state, deck.id);
     if (!Array.isArray(ds.current) || ds.current.length === 0) {
+        return false;
+    }
+    // 只有「由 AI 结束」的内容才听 END 标记。
+    // 按轮数 / 按天数 / 永久 的，等它自己到期，AI 回复里写了结束也不算数。
+    const hold = ds.hold || deck.hold || null;
+    if (!hold || hold.mode !== 'ai') {
         return false;
     }
     const dropped = ds.current.slice();

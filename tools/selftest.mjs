@@ -1168,6 +1168,61 @@ test('删楼回退后，条目自己的持续设置跟着回来', () => {
     assert.deepEqual(ds.current, ['a']);
 });
 
+
+
+test('初始值条目带的持续设置也生效：AI 结束标记不清它', () => {
+    const deck = {
+        id: 'end-initial',
+        name: '初始柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'i1', name: 'I1', text: 'I1', weight: 1, initial: true, hold: { mode: 'days', days: 3 } }],
+    };
+    const state = createState('end-initial-seed', 1);
+    state.gameDay = 5;
+    applyInitial(state, deck);
+    const ds = deckState(state, 'end-initial');
+    assert.deepEqual(ds.hold, { mode: 'days', days: 3 });
+    assert.equal(ds.holdStartDay, 5);
+    assert.equal(endHold(state, deck), false);
+    assert.equal(ds.current.length, 1);
+});
+
+section('AI 结束标记只对「由 AI 结束」生效');
+test('按天数持续的条目，AI 写结束标记也不会被清掉', () => {
+    const deck = {
+        id: 'end-days',
+        name: '天数柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'd1', name: 'D1', text: 'D1', weight: 1, hold: { mode: 'days', days: 3 } }],
+    };
+    const state = createState('end-days-seed', 1);
+    drawDeckTree(state, [deck], 'end-days', { force: true });
+    const ds = deckState(state, 'end-days');
+    assert.equal(ds.current.length, 1);
+    const ended = endHold(state, deck);
+    assert.equal(ended, false);
+    assert.equal(ds.current.length, 1);
+});
+
+test('「由 AI 结束」的条目，AI 写结束标记会被清掉', () => {
+    const deck = {
+        id: 'end-ai',
+        name: 'AI 柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a1', name: 'A1', text: 'A1', weight: 1, hold: { mode: 'ai' } }],
+    };
+    const state = createState('end-ai-seed', 1);
+    drawDeckTree(state, [deck], 'end-ai', { force: true });
+    const ds = deckState(state, 'end-ai');
+    assert.equal(ds.current.length, 1);
+    const ended = endHold(state, deck);
+    assert.equal(ended, true);
+    assert.equal(ds.current.length, 0);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);
