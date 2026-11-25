@@ -361,6 +361,22 @@
 #state-engine-panel .se-item-toggle input {
     margin: 0;
     cursor: pointer;
+    width: 15px;
+    height: 15px;
+}
+
+/* 手机上勾选框只有 13px，手指点不中：把可点区域撑到约 34px，用负外边距抵消占位。 */
+@media (max-width: 560px) {
+    #state-engine-panel .se-deck-toggle,
+    #state-engine-panel .se-item-toggle {
+        padding: 10px 8px;
+        margin: -10px -8px;
+    }
+    #state-engine-panel .se-deck-toggle input,
+    #state-engine-panel .se-item-toggle input {
+        width: 18px;
+        height: 18px;
+    }
 }
 
 #state-engine-panel .se-deck-off .se-deck-item-name {
