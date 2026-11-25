@@ -82,11 +82,11 @@ const BUTTON_ID = 'state-engine-button';
 let context;
 /** 时间提示的默认模板：{{time}} 现在的时间，{{paths}} 要改的变量路径，{{example}} 一条示例。 */
 const DEFAULT_TIME_TEMPLATE = [
-    '【时间】现在是 {{time}}。',
-    '如果这一轮剧情确实跨到了新的一天，请把时间和日期一起改掉（用这张卡本来改变量的写法）：',
+    '依据故事发展，请参考以下示例把这几个变量进行更新：',
     '{{paths}}',
+    '示例：',
     '{{example}}',
-    '没跨天就不要改；也不要为了更新时间而硬推进剧情。',
+    '更新条目放在最尾端。',
 ].join('\n');
 
 let settings = { enabled: true, aiTemplate: DEFAULT_AI_TEMPLATE, aiDepth: 4, timeTemplate: DEFAULT_TIME_TEMPLATE, timeDepth: 4, autoCardSync: false, applyMvuPatches: true, globalDecks: [] };
@@ -4383,9 +4383,16 @@ export async function init() {
         // 老版本默认模板（没改过的）跟着升级；用户自己改过的保留。
         const tplText = typeof settings.aiTemplate === 'string' ? settings.aiTemplate : '';
         const legacyTemplate = tplText.includes('可以申请的清单（下面会写清每份清单现在停在哪')
-            || tplText.includes('可以申请的清单如下：');
+            || tplText.includes('可以申请的清单如下：')
+            || (tplText.includes('停止和申请的标记要一同输出') && !tplText.includes('注意！'));
         if (!settings.aiTemplate || legacyTemplate) {
             settings.aiTemplate = DEFAULT_AI_TEMPLATE;
+        }
+        const timeTplText = typeof settings.timeTemplate === 'string' ? settings.timeTemplate : '';
+        const legacyTimeTemplate = timeTplText.includes('如果这一轮剧情确实跨到了新的一天')
+            || timeTplText.includes('照这张卡已有的变量更新格式');
+        if (!settings.timeTemplate || legacyTimeTemplate) {
+            settings.timeTemplate = DEFAULT_TIME_TEMPLATE;
         }
         if (!Number.isFinite(Number(settings.aiDepth))) {
             settings.aiDepth = 4;
