@@ -278,10 +278,6 @@
     cursor: pointer;
 }
 
-#state-engine-panel .se-deck-item:hover {
-    background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 4%, transparent);
-}
-
 #state-engine-panel .se-deck-item.active {
     background: color-mix(in srgb, var(--SmartThemeBodyColor, #ddd) 9%, transparent);
     box-shadow: inset 2px 0 0 var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor, #ddd));
@@ -383,8 +379,7 @@
     display: none;
 }
 
-#state-engine-panel .se-deck-item.active .se-deck-item-value,
-#state-engine-panel .se-deck-item:hover .se-deck-item-value {
+#state-engine-panel .se-deck-item.active .se-deck-item-value {
     display: block;
 }
 

@@ -3491,6 +3491,10 @@ function bindPanelEvents() {
     }
 
     root.addEventListener('click', (event) => {
+        // 点合集前面的启用勾选时，不要顺带把这一项选中（否则会重绘，勾选状态又被打回）。
+        if (event.target.closest('.se-deck-toggle')) {
+            return;
+        }
         const button = event.target.closest('[data-action]');
         if (!button) {
             return;
