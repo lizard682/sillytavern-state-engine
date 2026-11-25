@@ -1572,6 +1572,26 @@
     min-width: 0;
 }
 
+#state-engine-panel .se-set-group {
+    border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16));
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+#state-engine-panel .se-set-group:first-of-type {
+    border-top: 0;
+    margin-top: 4px;
+    padding-top: 0;
+}
+
+#state-engine-panel .se-set-group > .se-section-title {
+    margin-bottom: 6px;
+}
+
+#state-engine-panel .se-set-group > .se-global-actions {
+    margin: 6px 0;
+}
+
 #state-engine-panel .se-global-block {
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16));
     margin-top: 10px;

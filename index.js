@@ -3230,20 +3230,39 @@ function buildPanel() {
             </details>
             <details class="se-ledger se-settings">
                 <summary>设置</summary>
-                <label class="se-field se-field-wide">
-                    <span>AI 判定的提示词模板（{{decks}} 会被替换成各合集自己的标记和可选项）</span>
-                    <textarea id="se-ai-template" class="text_pole" rows="8"></textarea>
-                </label>
-                <label class="se-field">
-                    <span>AI 判定提示的插入深度（倒数第几条之前）</span>
-                    <input id="se-ai-depth" type="number" class="text_pole" min="0" step="1">
-                </label>
-                <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认模板</button>
-                <div class="se-hint">勾上顶栏的「随卡导出」后，导出角色卡时会自动带上绑定到这张卡的合集（以及和它们有关联的合集）；导出完成会把本地卡的开场白恢复原样。</div>
-                <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
-                <div class="se-hint">导出的是写给别的 AI 看的说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给模型，让它照格式写合集。</div>
-                <button type="button" class="menu_button" data-action="import-card-decks" title="把这张角色卡里带着的合集补进当前聊天（已存在的同名合集不会被覆盖）">从角色卡导入合集</button>
-                <div class="se-hint">这段文字会在启用「AI 判定」时随每轮生成发给模型。深度越小离当前输入越近，模型越容易照做。改完点一下别处就会保存。</div>
+                <div class="se-set-group">
+                    <div class="se-section-title">AI 判定提示词</div>
+                    <label class="se-field se-field-wide">
+                        <span>发给模型的说明（清单由插件自动接在最后，不用写 {{decks}}）</span>
+                        <textarea id="se-ai-template" class="text_pole" rows="8"></textarea>
+                    </label>
+                    <div class="se-hint">启用「AI 判定」时，每轮生成前把这段发给模型；改完点一下别处就保存。改坏了点下面「恢复默认提示词」。</div>
+                    <label class="se-field">
+                        <span>插入深度（倒数第几条之前；越小越靠近当前输入，模型越容易照做）</span>
+                        <input id="se-ai-depth" type="number" class="text_pole" min="0" step="1">
+                    </label>
+                    <div class="se-global-actions">
+                        <button type="button" class="menu_button" data-action="reset-ai-template">恢复默认提示词</button>
+                    </div>
+                </div>
+                <div class="se-set-group">
+                    <div class="se-section-title">随卡导出</div>
+                    <div class="se-hint">勾上顶栏的「随卡导出」后，导出角色卡时会自动带上绑定到这张卡的合集（以及和它们有关联的合集）；导出完成会把本地卡的开场白恢复原样。</div>
+                </div>
+                <div class="se-set-group">
+                    <div class="se-section-title">给别的 AI 写合集</div>
+                    <div class="se-global-actions">
+                        <button type="button" class="menu_button" data-action="export-guide">导出合集模板（给 AI 看）</button>
+                    </div>
+                    <div class="se-hint">导出的是一份说明书：格式、字段、写法建议，外加一份能直接导入的示例。把它丢给别的模型，让它照格式写合集。</div>
+                </div>
+                <div class="se-set-group">
+                    <div class="se-section-title">从角色卡导入</div>
+                    <div class="se-global-actions">
+                        <button type="button" class="menu_button" data-action="import-card-decks" title="把这张角色卡里带着的合集补进当前聊天">把卡里带的合集导入本聊天</button>
+                    </div>
+                    <div class="se-hint">只补缺的：已经有同名合集时保持原样，不会覆盖你现在的内容。</div>
+                </div>
                 <div class="se-global-block">
                     <div class="se-section-title">公共合集库 <span class="se-muted">（存在插件设置里，任何聊天、任何角色卡都能用）</span></div>
                     <div class="se-global-actions">
