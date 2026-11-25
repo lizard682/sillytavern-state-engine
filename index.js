@@ -1440,8 +1440,11 @@ function refreshInjections() {
         }
     }
     // 导演提示只列此刻真的会生效的合集：绑定角色不在场、或只能被上级抽中的子合集，都别让模型白申请。
-    // 不可打断生效时，干脆只把锁定合集交给模型——哪怕它是子合集，锁定期间它就是焦点。
+    // 不可打断生效时，只把锁定合集和「没被它压制」的例外交给模型。
     const lockDeck = activeLockDeck(store.state, store.decks);
+    const suppressedIds = lockDeck
+        ? store.decks.filter((deck) => lockSuppresses(deck, lockDeck)).map((deck) => deck.id)
+        : [];
     const directorDecks = store.decks.filter((deck) => {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
             return false;
@@ -1461,7 +1464,9 @@ function refreshInjections() {
         currentByDeck,
         done: doneSet(store.state),
         state: store.state,
-        lockName: lockDeck ? lockDeck.name : '',
+        // 只有真的压住了别人，才告诉模型「有东西在休眠」；否则它会把例外项也当成不能申请的。
+        lockName: lockDeck && suppressedIds.length > 0 ? lockDeck.name : '',
+        suppressedCount: suppressedIds.length,
     });
     const aiDepth = Math.max(0, Number(settings.aiDepth) || 4);
     ctx.setExtensionPrompt(DIRECTOR_KEY, director, PROMPT_POSITION.chat, aiDepth, false, PROMPT_ROLE.system);
@@ -1856,8 +1861,8 @@ function drawOne(deckId, { reroll = false } = {}) {
     syncGameDay(store);
     // 「不可打断」的合集开着时，手动抽别的会被自动抽取忽略，先说一句。
     const lockDeck = activeLockDeck(store.state, store.decks);
-    if (lockDeck && lockDeck.id !== deckId) {
-        toast('info', `「${lockDeck.name || lockDeck.id}」开着不可打断，自动抽取只会抽它。`);
+    if (lockDeck && lockSuppresses(deck, lockDeck)) {
+        toast('info', `「${lockDeck.name || lockDeck.id}」开着不可打断，自动抽取不会碰这个合集。`);
     }
     // 每按一次「抽/重抽」都推进一期随机流：同楼层同一个 nonce 只会得到同一个结果。
     ds.nonce = (Number(ds.nonce) || 0) + 1;
@@ -2131,11 +2136,20 @@ async function judgeNow() {
             return [deck.id, ids];
         }));
         const lockDeck = activeLockDeck(store.state, store.decks);
+        const suppressedCount = lockDeck
+            ? store.decks.filter((deck) => lockSuppresses(deck, lockDeck)).length
+            : 0;
         const prompt = buildDirectorPrompt(
-            lockDeck ? usable.filter((deck) => deck.id === lockDeck.id) : usable,
+            lockDeck ? usable.filter((deck) => deck.id === lockDeck.id || !lockSuppresses(deck, lockDeck)) : usable,
             settings.aiTemplate,
             itemsByDeck,
-            { currentByDeck, done: doneSet(store.state), state: store.state, lockName: lockDeck ? lockDeck.name : '' },
+            {
+                currentByDeck,
+                done: doneSet(store.state),
+                state: store.state,
+                lockName: lockDeck && suppressedCount > 0 ? lockDeck.name : '',
+                suppressedCount,
+            },
         );
         if (!prompt) {
             toast('info', '现在没有可申请的清单。');
@@ -4116,7 +4130,7 @@ function processAiMarkers(store, ctx) {
         if (deck.enabled === false || !bindingActive(deck, ctx)) {
             continue;
         }
-        if (lockDeck && deck.id !== lockDeck.id) {
+        if (lockSuppresses(deck, lockDeck)) {
             continue;
         }
         if ((deck.trigger || DEFAULT_TRIGGER).ai !== true) {

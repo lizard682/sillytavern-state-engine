@@ -100,7 +100,7 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
     const lockName = String(contextInfo.lockName || '').trim();
     if (usable.length === 0 && endable.length === 0) {
         return lockName
-            ? `现在「${lockName}」开着不可打断，其它清单暂时休眠；等它抽无可抽，再申请调别的。`
+            ? `现在「${lockName}」开着不可打断，它压住的清单暂时休眠；眼下没有能申请的清单。`
             : '';
     }
 
@@ -192,7 +192,7 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
         return `- ${deck.name}｜申请时写这串：<!--SE:${deck.id}-->${tail ? `\n  ${tail}` : ''}`;
     });
     const lockLine = lockName
-        ? `现在「${lockName}」开着不可打断，只处理它；其它清单暂时休眠，等它抽无可抽再说。\n`
+        ? `现在「${lockName}」开着不可打断，只压住了 ${Number(contextInfo.suppressedCount) || 0} 份清单；下面列出来的这些不在压制范围里，照常可以申请。\n`
         : '';
     const body = usable.length > 0
         ? lockLine + (template || DEFAULT_AI_TEMPLATE).replace('{{decks}}', lines.join('\n'))
