@@ -1656,10 +1656,13 @@ function advanceOnGeneration() {
     }
     // 模型主动喊停的内容。
     const endMarkers = endMarkersInLastAiMessage();
+    const endedIds = [];
     if (endMarkers.length > 0 && markerFloor !== floor) {
         for (const deck of store.decks) {
             if (deck.enabled !== false && endMarkers.includes(deck.id)) {
-                endHold(store.state, deck);
+                if (endHold(store.state, deck)) {
+                    endedIds.push(deck.id);
+                }
             }
         }
     }
@@ -1732,6 +1735,32 @@ function advanceOnGeneration() {
     if (summoned.length > 0) {
         fired.push(...summoned);
     }
+
+    // 只喊了结束、没有接上新内容的合集：这里补抽一次，避免剧情断在半路。
+    for (const endedId of endedIds) {
+        if (fired.includes(endedId)) {
+            continue;
+        }
+        const deck = store.decks.find((item) => item.id === endedId);
+        if (!deck || deck.enabled === false || !bindingActive(deck, ctx, pendingInput)) {
+            continue;
+        }
+        if (deckExhausted(store.state, store.decks, deck.id)) {
+            continue;
+        }
+        // 换一条：推一下随机流，别又抽回刚结束的那条。
+        const endedState = deckState(store.state, deck.id);
+        endedState.nonce = (Number(endedState.nonce) || 0) + 1;
+        const tree = drawDeckTree(store.state, store.decks, deck.id, {
+            force: true,
+            cause: 'ai',
+            ignoreHold: true,
+        });
+        if (tree.result?.changed) {
+            fired.push(deck.id);
+        }
+    }
+
     // 只有真的抽中了才记住「这一楼处理过标记」，否则一次失败会把这个楼层永久锁死。
     if (freshMarkers.length > 0 && fired.length > 0) {
         store.state.markerFloor = floor;

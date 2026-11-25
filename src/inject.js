@@ -200,7 +200,11 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
     if (endable.length === 0) {
         return body;
     }
-    const endLines = endable.map((deck) => `- ${deck.name}：<!--SE-END:${deck.id}-->`);
-    const endBlock = `如果下面这些内容已经不需要了，可以在回复的最后单独一行写标记结束：\n${endLines.join('\n')}`;
+    const endLines = endable.map((deck) => `- ${deck.name}：结束写 <!--SE-END:${deck.id}-->，紧接着换下一段就再写一行 <!--SE:${deck.id}-->`);
+    const endBlock = [
+        '如果下面这些内容已经演完了，可以在回复的最后单独几行写标记：',
+        '结束标记和接续标记要成对写——先写结束，紧跟着写「换下一段」的申请；只写结束会让这段剧情断在半路。',
+        endLines.join('\n'),
+    ].join('\n');
     return body ? `${body}\n\n${endBlock}` : endBlock;
 }
