@@ -3922,6 +3922,16 @@ function processAiMarkers(store, ctx) {
     syncTurn(store.state, ctx?.chat?.length ?? 0);
     syncGameDay(store);
     const floor = Number(store.state.turn) || 0;
+    // 先处理「结束」：模型可能在同一楼里既喊结束、又申请下一段。
+    // 不先清掉当前内容的话，下面抽签会被「还在持续」挡住，看起来就像没反应。
+    const endMarkers = endMarkersInLastAiMessage();
+    if (endMarkers.length > 0) {
+        for (const deck of store.decks) {
+            if (deck.enabled !== false && endMarkers.includes(deck.id)) {
+                endHold(store.state, deck);
+            }
+        }
+    }
     const markers = markersInLastAiMessage();
     if (markers.length === 0) {
         return 0;
