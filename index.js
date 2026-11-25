@@ -3992,7 +3992,10 @@ export async function init() {
         } catch (error) {
             /* 缓存坏了就忽略 */
         }
-        if (!settings.aiTemplate) {
+        // 老版本默认模板（没改过的）跟着升级；用户自己改过的保留。
+        const legacyTemplate = typeof settings.aiTemplate === 'string'
+            && settings.aiTemplate.includes('可以申请的清单（下面会写清每份清单现在停在哪');
+        if (!settings.aiTemplate || legacyTemplate) {
             settings.aiTemplate = DEFAULT_AI_TEMPLATE;
         }
         if (!Number.isFinite(Number(settings.aiDepth))) {
