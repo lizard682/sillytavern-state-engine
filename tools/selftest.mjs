@@ -1119,6 +1119,31 @@ test('持续结束（按轮数到期）之后可以再抽', () => {
     assert.equal(again.ok, true);
 });
 
+
+section('AI 结束模式：没写结束就保持原样');
+test('由 AI 结束的条目，没收到结束标记时不会被换掉', () => {
+    const deck = {
+        id: 'aihold-a',
+        name: 'AI 持有柜',
+        cooldown: 0,
+        pick: 1,
+        items: [{ id: 'a', name: 'A', text: 'A', weight: 1, hold: { mode: 'ai' } }],
+    };
+    const state = createState('aihold-seed', 30);
+    const first = drawDeckTree(state, [deck], 'aihold-a', { force: true });
+    assert.equal(first.ok, true);
+    assert.equal(holdActive(state, deck), true);
+    state.turn = 31;
+    const blocked = drawDeckTree(state, [deck], 'aihold-a', {});
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.reason, 'holding');
+    // 收到结束标记后清空，就可以再抽
+    endHold(state, deck, 'ai-end');
+    assert.equal(holdActive(state, deck), false);
+    const again = drawDeckTree(state, [deck], 'aihold-a', {});
+    assert.equal(again.ok, true);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
     process.exit(1);

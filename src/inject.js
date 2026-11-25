@@ -73,7 +73,7 @@ export const DEFAULT_AI_TEMPLATE = [
     '你可以在剧情自然需要时申请调整下面这些清单。先在心里过一遍：',
     '1. 观察：这一轮发生在什么场景，角色正在做什么。',
     '2. 判断：是否出现了「必须换一套 / 换一个」的明确理由（换衣服、到新地点、用技能、顺手拿道具……）。',
-    '3. 克制：理由不充分就不要申请；同一件事不要连续两轮申请。',
+    '3. 克制：理由不充分就不要申请；同一件事不要连续两轮申请；正在推进的剧情不要申请换下一段，等它演完再说。',
     '决定申请时，在回复的最后单独一行输出标记，格式：<!--SE:合集id-->',
     '标记是写给系统看的，不会出现在正文里；只输出标记本身，不要解释，也不要重复清单内容。',
     '',
@@ -200,10 +200,11 @@ export function buildDirectorPrompt(decks, template = '', itemsByDeck = {}, cont
     if (endable.length === 0) {
         return body;
     }
-    const endLines = endable.map((deck) => `- ${deck.name}：结束写 <!--SE-END:${deck.id}-->，紧接着换下一段就再写一行 <!--SE:${deck.id}-->`);
+    const endLines = endable.map((deck) => `- ${deck.name}：<!--SE-END:${deck.id}--> 然后 <!--SE:${deck.id}-->`);
     const endBlock = [
-        '如果下面这些内容已经演完了，可以在回复的最后单独几行写标记：',
-        '结束标记和接续标记要成对写——先写结束，紧跟着写「换下一段」的申请；只写结束会让这段剧情断在半路。',
+        '只有下面这些内容已经彻底演完、该换下一段了，才在回复最后单独几行写：',
+        '1. 先写结束标记；2. 紧接着写换下一段的申请。',
+        '没演完就什么都不要写——只写申请不会换，写了也白写。',
         endLines.join('\n'),
     ].join('\n');
     return body ? `${body}\n\n${endBlock}` : endBlock;

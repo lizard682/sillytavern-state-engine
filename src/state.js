@@ -812,6 +812,10 @@ export function holdActive(state, deck) {
         }
         return nowDay - start < days;
     }
+    if (hold.mode === 'ai') {
+        // 由 AI 判断结束：模型没写结束标记之前，这段内容就一直演下去，不换新的。
+        return true;
+    }
     return false;
 }
 
