@@ -82,6 +82,7 @@ const BUTTON_ID = 'state-engine-button';
 let context;
 /** 时间提示的默认模板：{{time}} 现在的时间，{{paths}} 要改的变量路径，{{example}} 一条示例。 */
 const DEFAULT_TIME_TEMPLATE = [
+    '【时间】现在是 {{time}}。',
     '依据故事发展，请参考以下示例把这几个变量进行更新：',
     '{{paths}}',
     '示例：',
@@ -4390,7 +4391,8 @@ export async function init() {
         }
         const timeTplText = typeof settings.timeTemplate === 'string' ? settings.timeTemplate : '';
         const legacyTimeTemplate = timeTplText.includes('如果这一轮剧情确实跨到了新的一天')
-            || timeTplText.includes('照这张卡已有的变量更新格式');
+            || timeTplText.includes('照这张卡已有的变量更新格式')
+            || (timeTplText.includes('依据故事发展') && !timeTplText.includes('{{time}}'));
         if (!settings.timeTemplate || legacyTimeTemplate) {
             settings.timeTemplate = DEFAULT_TIME_TEMPLATE;
         }
