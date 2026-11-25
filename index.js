@@ -1659,7 +1659,10 @@ function advanceOnGeneration() {
     const endedIds = [];
     if (endMarkers.length > 0 && markerFloor !== floor) {
         for (const deck of store.decks) {
-            if (deck.enabled !== false && endMarkers.includes(deck.id)) {
+            if (deck.enabled === false || (deck.trigger || DEFAULT_TRIGGER).ai !== true) {
+                continue;
+            }
+            if (endMarkers.includes(deck.id)) {
                 if (endHold(store.state, deck)) {
                     endedIds.push(deck.id);
                 }
@@ -3927,7 +3930,10 @@ function processAiMarkers(store, ctx) {
     const endMarkers = endMarkersInLastAiMessage();
     if (endMarkers.length > 0) {
         for (const deck of store.decks) {
-            if (deck.enabled !== false && endMarkers.includes(deck.id)) {
+            if (deck.enabled === false || (deck.trigger || DEFAULT_TRIGGER).ai !== true) {
+                continue;
+            }
+            if (endMarkers.includes(deck.id)) {
                 endHold(store.state, deck);
             }
         }
