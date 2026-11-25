@@ -4244,6 +4244,10 @@ function applyMvuUpdates(store, ctx) {
     store.state.appliedPatchFloor = floor;
     if (changed > 0) {
         ctx.saveMetadataDebounced?.();
+        // 日期可能被改了：立刻同步游戏内天数，让「按天」的冷却和剩余天数当场跟上。
+        syncGameDay(store);
+        refreshInjections();
+        refreshPanelLight();
         toast('success', `已按 AI 的更新块改写了 ${changed} 处变量`);
     }
     return changed;
