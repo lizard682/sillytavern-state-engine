@@ -332,9 +332,12 @@ function saveStore({ immediate = false } = {}) {
         }
     }
     if (immediate) {
-        ctx?.saveMetadata?.();
+        (ctx?.saveMetadata || ctx?.saveMetadataDebounced)?.();
+    } else if (typeof ctx?.saveMetadataDebounced === 'function') {
+        ctx.saveMetadataDebounced();
     } else {
-        ctx?.saveMetadataDebounced?.();
+        // 老版本酒馆没有防抖版：至少别让数据只停在内存里。
+        ctx?.saveMetadata?.();
     }
 }
 
@@ -2242,6 +2245,10 @@ async function judgeNow() {
             return;
         }
         toast('info', '正在让模型判断一次…');
+        if (typeof ctx.generateQuietPrompt !== 'function') {
+            toast('warning', '这个版本的酒馆没有 generateQuietPrompt，暂时不能用「立即判断」；等下一轮生成时会照常判断。');
+            return;
+        }
         const reply = await Promise.race([
             ctx.generateQuietPrompt({ quietPrompt: prompt, skipWIAN: true }),
             new Promise((resolve) => setTimeout(() => resolve(null), 60000)),
@@ -4431,14 +4438,29 @@ export async function init() {
         if (autoSyncBox) {
             autoSyncBox.checked = settings.autoCardSync === true;
         }
-        eventSource.on(eventTypes.CHAT_CHANGED, onChatChanged);
-        eventSource.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
-        // 消息一落地就认标记，别等下一轮生成开头：那样会白白浪费一整轮。
-        eventSource.on(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
-        // 删楼 / 切分支要把状态跟回去。
-        eventSource.on(eventTypes.MESSAGE_DELETED, onMessageDeleted);
-        eventSource.on(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
-        eventSource.on(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
+        // 老版本酒馆可能没有这些事件名：只注册确实存在的事件，别拿 undefined 去 on。
+        const boundedEvents = [
+            ['CHAT_CHANGED', onChatChanged],
+            ['GENERATION_STARTED', onGenerationStarted],
+            // 消息一落地就认标记，别等下一轮生成开头：那样会白白浪费一整轮。
+            ['MESSAGE_RECEIVED', onMessageReceived],
+            // 删楼 / 切分支要把状态跟回去。
+            ['MESSAGE_DELETED', onMessageDeleted],
+            ['CHARACTER_PAGE_LOADED', onCharacterPageLoaded],
+            ['CHARACTER_EDITOR_OPENED', onCharacterPageLoaded],
+        ];
+        if (!Array.isArray(globalThis.__stateEngineEvents)) {
+            globalThis.__stateEngineEvents = [];
+        }
+        for (const [name, handler] of boundedEvents) {
+            const type = eventTypes?.[name];
+            if (type === undefined || type === null) {
+                console.info(`[state-engine] 当前酒馆没有 ${name} 事件，跳过注册`);
+                continue;
+            }
+            eventSource.on(type, handler);
+            globalThis.__stateEngineEvents.push([type, handler]);
+        }
         renderPanel();
         refreshInjections();
         // 装了插件的人打开带提醒的卡时，把开局换回作者写的那一条。
@@ -4456,13 +4478,12 @@ export async function init() {
 export async function clean() {
     try {
         const ctx = liveContext();
-        const { eventSource, eventTypes } = ctx;
-        eventSource?.removeListener?.(eventTypes.CHAT_CHANGED, onChatChanged);
-        eventSource?.removeListener?.(eventTypes.GENERATION_STARTED, onGenerationStarted);
-        eventSource?.removeListener?.(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
-        eventSource?.removeListener?.(eventTypes.MESSAGE_DELETED, onMessageDeleted);
-        eventSource?.removeListener?.(eventTypes.CHARACTER_PAGE_LOADED, onCharacterPageLoaded);
-        eventSource?.removeListener?.(eventTypes.CHARACTER_EDITOR_OPENED, onCharacterPageLoaded);
+        const { eventSource } = ctx;
+        const bounded = Array.isArray(globalThis.__stateEngineEvents) ? globalThis.__stateEngineEvents : [];
+        for (const [type, handler] of bounded) {
+            eventSource?.removeListener?.(type, handler);
+        }
+        globalThis.__stateEngineEvents = [];
         clearInjections(ctx, getDecks());
         if (installCardExportHook.installed && installCardExportHook.originalFetch) {
             window.fetch = installCardExportHook.originalFetch;

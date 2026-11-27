@@ -17,8 +17,11 @@
     left: 50% !important;
     right: auto !important;
     transform: translateX(-50%);
-    width: var(--sheldWidth, 50vw) !important;
-    min-width: 540px !important;
+    /* 宽度取「ST 抽屉宽」和「视口宽」里更小的那个：
+       手机上没有 --sheldWidth 或它比屏幕宽时，也不会把面板撑出屏幕。 */
+    width: min(var(--sheldWidth, 50vw), calc(100vw - 16px)) !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
     height: calc(100dvh - var(--topBarBlockSize, 50px) - 12px) !important;
     max-height: calc(100dvh - var(--topBarBlockSize, 50px) - 12px) !important;
     margin: 0 !important;
@@ -1336,6 +1339,25 @@
 
     #state-engine-panel .se-air-bar {
         display: none;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 手机/小平板（≤720px）：面板改成整屏，不再居中悬浮                       */
+/* ST 在手机上会隐藏左右侧栏，抽屉宽度变量也可能比屏幕还宽；                */
+/* 这里直接铺满视口，避免右侧被挤出屏幕外。                                */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 720px) {
+    #state-engine-panel {
+        left: 0 !important;
+        right: 0 !important;
+        transform: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box;
+        border-radius: 0;
     }
 }
 
